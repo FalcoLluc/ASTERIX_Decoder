@@ -1,5 +1,11 @@
 # Project specific ignores
-data/
+data/samples/*
+data/output/*
+data/raw/*
+!data/samples/.gitkeep
+!data/output/.gitkeep
+!data/raw/.gitkeep
+
 .idea/
 .DS_Store
 
