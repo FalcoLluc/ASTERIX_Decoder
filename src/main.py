@@ -6,8 +6,6 @@ def main():
     file_path = base_dir / "data" / "samples" / "datos_asterix_adsb.ast"
 
     reader = AsterixFileReader(str(file_path))
-    records = reader.read_records()
-    print(list(reader.read_records()))
 
 if __name__ == "__main__":
     main()
