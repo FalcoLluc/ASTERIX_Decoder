@@ -1,15 +1,14 @@
 import mmap
-from typing import Iterator, Union
-from src.models.asterix_base import AsterixBase
-from src.models.cat021_record import CAT021Record
-from src.models.cat048_record import CAT048Record
+from typing import Iterator
+from src.models.record import Record
+from src.types.enums import Category
 
 
 class AsterixFileReader:
     def __init__(self, file_path: str):
         self.file_path = file_path
 
-    def read_records(self) -> Iterator[Union[CAT021Record, CAT048Record]]:
+    def read_records(self) -> Iterator[Record]:
         """Efficiently read Asterix records using memory mapping."""
         with open(self.file_path, 'rb') as file:
             with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
@@ -21,10 +20,14 @@ class AsterixFileReader:
                 while position < file_size - 3:
                     # Store Block Offset (position of the record in the file)
                     block_offset = position
-
                     # Read category (1 byte)
-                    category = mmapped_file[position]
+                    category_int = mmapped_file[position]
                     position += 1
+                    try:
+                        category = Category(category_int)
+                    except ValueError:
+                        # Skip unsupported categories
+                        continue
 
                     # Read length (2 bytes, big-endian)
                     if position + 1 >= file_size:
@@ -43,17 +46,36 @@ class AsterixFileReader:
                     position += (length - 3)
 
                     # Create appropriate record based on category
-                    base_record = AsterixBase(
+                    base_record = Record(
                         category=category,
                         length=length,
                         raw_data=data,
-                        block_offset=block_offset
+                        block_offset=block_offset,
+                        items=[]
                     )
+                    yield Record(**base_record.__dict__)
 
-                    if category == 21:
-                        yield CAT021Record(**base_record.__dict__)
-                    elif category == 48:
-                        yield CAT048Record(**base_record.__dict__)
-                    else:
-                        # Skip unsupported categories or handle as base
-                        continue
+    def read_record_at_position(self, position: int) -> Record:
+        """Read a specific record at given byte position in file."""
+        with open(self.file_path, 'rb') as file:
+            with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
+                if position >= len(mmapped_file) - 3:
+                    raise ValueError("Position beyond file size")
+
+                # Read category (1 byte)
+                category_int = mmapped_file[position]
+                position += 1
+                try:
+                    category = Category(category_int)
+                except ValueError:
+                    # Skip unsupported categories
+                    return None
+                length = (mmapped_file[position + 1] << 8) | mmapped_file[position + 2]
+
+                if length < 3 or position + length > len(mmapped_file):
+                    raise ValueError("Invalid record at position")
+
+                data = mmapped_file[position + 3:position + length]
+
+                # Create appropriate record
+                return Record(category, length, data, position, [])
