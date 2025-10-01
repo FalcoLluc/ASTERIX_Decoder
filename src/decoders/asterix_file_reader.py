@@ -53,10 +53,11 @@ class AsterixFileReader:
                         block_offset=block_offset,
                         items=[]
                     )
-                    yield Record(**base_record.__dict__)
+                    yield base_record
 
-    def read_record_at_position(self, position: int) -> Record:
+    def read_record_at_position(self, start_position: int) -> Record:
         """Read a specific record at given byte position in file."""
+        position = start_position
         with open(self.file_path, 'rb') as file:
             with mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as mmapped_file:
                 if position >= len(mmapped_file) - 3:
@@ -78,4 +79,4 @@ class AsterixFileReader:
                 data = mmapped_file[position + 3:position + length]
 
                 # Create appropriate record
-                return Record(category, length, data, position, [])
+                return Record(category, length, data, start_position, [])

@@ -1,4 +1,4 @@
-from src.utils.asterix_decoder_base import AsterixDecoderBase
+from src.decoders.asterix_decoder_base import AsterixDecoderBase
 from src.types.enums import CAT021ItemType
 from src.models.record import Record
 

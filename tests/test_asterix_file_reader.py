@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from src.utils.asterix_file_reader import AsterixFileReader
+from src.decoders.asterix_file_reader import AsterixFileReader
 
 @pytest.mark.parametrize(
     "file,number",
