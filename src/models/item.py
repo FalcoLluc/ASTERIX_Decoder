@@ -6,7 +6,7 @@ from src.types.enums import CAT021ItemType, CAT048ItemType, Category
 class Item:
     """Unified item model for ASTERIX records."""
     #category: Category # Potser el atribut category no cal! Ja estarà en Record.
-    item_offset: int
+    item_offset: int # TODO: RESPECTE START RAW DATA (no Record) canviar?
     length: int
     frn: int
     item_type: Union[CAT021ItemType,CAT048ItemType]

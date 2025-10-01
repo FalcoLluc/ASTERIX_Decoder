@@ -27,18 +27,17 @@ class Cat048Decoder(AsterixDecoderBase):
     def decode_record(self, record: Record) -> Record:
         """Main decoding method"""
         # Parse FSPEC to get list of items in order
-        fspec_items, data_start = self._parse_fspec(record.raw_data)
+        fspec_items, data_start = self._parse_fspec(record)
 
         # Initialize pointer to data after FSPEC
         data_pointer = data_start
-        raw_data = record.raw_data
 
         # Decode each item in FSPEC order
         for item_type in fspec_items:
             decoder_func = self.decoder_map.get(item_type)
             if decoder_func:
                 # Each decoder returns the new data pointer position
-                data_pointer = decoder_func(raw_data, data_pointer, record)
+                data_pointer = decoder_func(data_pointer, record)
             else:
                 print(f"Warning: No decoder for CAT048 item {item_type}")
                 # Skip this item - we need to know its length to continue
@@ -48,11 +47,12 @@ class Cat048Decoder(AsterixDecoderBase):
         return record
 
     # DE MOM PODRIA SER ESTATIC PERO SI DESPRES AGAFA ELS PARAMETRES DEL CONSTRUCTOR SI QUE SERA METODE
-    def _parse_fspec(self, raw_data: bytes) -> tuple[List[CAT048ItemType], int]:
+    def _parse_fspec(self, record: Record) -> tuple[List[CAT048ItemType], int]:
         """
         Parse Field Specification to determine which data items are present.
         Returns: (list of item types in order, position where data starts)
         """
+        raw_data = record.raw_data
         fspec_items = []
         position = 0
         frn = 1
@@ -84,8 +84,9 @@ class Cat048Decoder(AsterixDecoderBase):
         return fspec_items, position
 
     # DECODER METHODS - IMPLEMENT THESE STEP BY STEP
-    def _decode_data_source(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_data_source(self, pos: int, record: Record) -> int:
         """I048/010 - Data Source Identifier (2 bytes)"""
+        data=record.raw_data
         if pos + 2 > len(data):
             return pos
 
@@ -103,8 +104,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 2
 
-    def _decode_time_of_day(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_time_of_day(self, pos: int, record: Record) -> int:
         """I048/140 - Time of Day (3 bytes)"""
+        data=record.raw_data
         if pos + 3 > len(data):
             return pos
 
@@ -120,8 +122,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 3
 
-    def _decode_target_report_descriptor(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_target_report_descriptor(self, pos: int, record: Record) -> int:
         """I048/020 - Target Report Descriptor (1 byte)"""
+        data=record.raw_data
         if pos + 1 > len(data):
             return pos
 
@@ -138,8 +141,9 @@ class Cat048Decoder(AsterixDecoderBase):
         # TODO: SHA DE MIRAR SI ES VARIABLE
         return pos + 1
 
-    def _decode_measured_position_polar(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_measured_position_polar(self, pos: int, record: Record) -> int:
         """I048/040 - Measured Position in Slant Polar Coordinates (4 bytes)"""
+        data=record.raw_data
         if pos + 4 > len(data):
             return pos
 
@@ -156,19 +160,20 @@ class Cat048Decoder(AsterixDecoderBase):
         return pos + 4
 
     # Add the other decoder methods with the same pattern...
-    def _decode_mode_3a_code(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_mode_3a_code(self, pos: int, record: Record) -> int:
         """I048/070 - Mode-3/A Code (2 bytes)"""
         return pos + 2  # Placeholder
 
-    def _decode_flight_level(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_flight_level(self, pos: int, record: Record) -> int:
         """I048/090 - Flight Level (2 bytes)"""
         return pos + 2  # Placeholder
 
     # ... continue with all other methods
 
 
-    def _decode_radar_plot_characteristics(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_radar_plot_characteristics(self, pos: int, record: Record) -> int:
         """I048/130 - Radar Plot Characteristics (1 byte)"""
+        data=record.raw_data
         if pos + 1 > len(data):
             return pos
 
@@ -183,8 +188,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 1
 
-    def _decode_aircraft_address(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_aircraft_address(self, pos: int, record: Record) -> int:
         """I048/220 - Aircraft Address (3 bytes)"""
+        data=record.raw_data
         if pos + 3 > len(data):
             return pos
 
@@ -199,8 +205,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 3
 
-    def _decode_aircraft_identification(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_aircraft_identification(self, pos: int, record: Record) -> int:
         """I048/240 - Aircraft Identification (6 bytes)"""
+        data=record.raw_data
         if pos + 6 > len(data):
             return pos
 
@@ -215,8 +222,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 6
 
-    def _decode_mode_s_mb_data(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_mode_s_mb_data(self, pos: int, record: Record) -> int:
         """I048/250 - Mode S MB Data (8 bytes)"""
+        data=record.raw_data
         if pos + 8 > len(data):
             return pos
 
@@ -231,8 +239,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 8
 
-    def _decode_track_number(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_track_number(self, pos: int, record: Record) -> int:
         """I048/161 - Track Number (2 bytes)"""
+        data=record.raw_data
         if pos + 2 > len(data):
             return pos
 
@@ -249,8 +258,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 2
 
-    def _decode_track_velocity_polar(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_track_velocity_polar(self, pos: int, record: Record) -> int:
         """I048/200 - Track Velocity in Polar Representation (4 bytes)"""
+        data=record.raw_data
         if pos + 4 > len(data):
             return pos
 
@@ -265,8 +275,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 4
 
-    def _decode_track_status(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_track_status(self, pos: int, record: Record) -> int:
         """I048/170 - Track Status (2 bytes)"""
+        data=record.raw_data
         if pos + 2 > len(data):
             return pos
 
@@ -281,8 +292,9 @@ class Cat048Decoder(AsterixDecoderBase):
 
         return pos + 2
 
-    def _decode_communications_acas(self, data: bytes, pos: int, record: Record) -> int:
+    def _decode_communications_acas(self, pos: int, record: Record) -> int:
         """I048/230 - Communications/ACAS Capability (1 byte)"""
+        data=record.raw_data
         if pos + 1 > len(data):
             return pos
 

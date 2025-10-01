@@ -10,5 +10,5 @@ class Record:
     category: Category
     length: int
     raw_data: bytes
-    block_offset: int
+    block_offset: int # Inici Record Respecte Arxiu
     items: List[Item]
