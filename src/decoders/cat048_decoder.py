@@ -105,18 +105,44 @@ class Cat048Decoder(AsterixDecoderBase):
         return pos + 2
 
     def _decode_time_of_day(self, pos: int, record: Record) -> int:
-        """I048/140 - Time of Day (3 bytes)"""
-        data=record.raw_data
+        """I048/140 - Time of Day (3 bytes)
+        Spec: The time information, coded in three octets, shall reflect the exact
+        time of an event, expressed as a number of 1/128 s elapsed since
+        last midnight.
+        """
+        data = record.raw_data
         if pos + 3 > len(data):
             return pos
 
-        # TODO: Implement time decoding
+        # Read 3 bytes and convert to integer (big-endian)
+        time_bytes = data[pos:pos + 3]
+        time_128_seconds = int.from_bytes(time_bytes, byteorder='big')
+
+        # Convert to seconds (divide by 128 since each unit = 1/128 second)
+        total_seconds = time_128_seconds / 128.0
+
+        # Calculate hours, minutes, seconds
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        seconds = total_seconds % 60
+
+        # Format as time string
+        time_str = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
         item = Item(
             item_offset=pos,
             length=3,
             frn=2,
             item_type=CAT048ItemType.TIME_OF_DAY,
-            value={"raw": data[pos:pos + 3]}
+            value={
+                "raw_bytes": list(time_bytes),
+                "time_128_seconds": time_128_seconds,
+                "total_seconds": total_seconds,
+                "time_string": time_str,
+                "hours": hours,
+                "minutes": minutes,
+                "seconds": seconds
+            }
         )
         record.items.append(item)
 
@@ -142,18 +168,44 @@ class Cat048Decoder(AsterixDecoderBase):
         return pos + 1
 
     def _decode_measured_position_polar(self, pos: int, record: Record) -> int:
-        """I048/040 - Measured Position in Slant Polar Coordinates (4 bytes)"""
-        data=record.raw_data
+        """I048/040 - Measured Position in Polar Coordinates (4 bytes)"""
+        data = record.raw_data
         if pos + 4 > len(data):
             return pos
 
-        # TODO: Implement polar coordinates decoding
+        # Read 4 bytes
+        position_bytes = data[pos:pos + 4]
+
+        # Extract RHO (range) - first 2 bytes (16 bits)
+        rho_bytes = position_bytes[0:2]
+        rho_256_nm = int.from_bytes(rho_bytes, byteorder='big')
+
+        # Extract THETA (angle) - last 2 bytes (16 bits)
+        theta_bytes = position_bytes[2:4]
+        theta_units = int.from_bytes(theta_bytes, byteorder='big')
+
+        # Convert RHO to nautical miles (bit-17 (LSB) = 1/256 NM)
+        range_nm = rho_256_nm / 256.0
+
+        # Convert THETA to degrees (1 LSB = 360°/65536 ≈ 0.0055°)
+        theta_degrees = (theta_units * 360.0) / 65536.0
+
+        # Normalize angle to 0-360 degrees
+        theta_degrees %= 360.0
+
         item = Item(
             item_offset=pos,
             length=4,
             frn=4,
             item_type=CAT048ItemType.MEASURED_POSITION_POLAR,
-            value={"raw": data[pos:pos + 4]}
+            value={
+                "raw_bytes": list(position_bytes),
+                "rho_256_nm": rho_256_nm,
+                "theta_units": theta_units,
+                "range_nm": range_nm,
+                "angle_degrees": theta_degrees,
+                "formatted": f"Range: {range_nm:.3f} NM, Angle: {theta_degrees:.3f}°"
+            }
         )
         record.items.append(item)
 
@@ -186,6 +238,7 @@ class Cat048Decoder(AsterixDecoderBase):
         )
         record.items.append(item)
 
+        # TODO: SHA DE MIRAR SI ES VARIABLE
         return pos + 1
 
     def _decode_aircraft_address(self, pos: int, record: Record) -> int:
@@ -237,6 +290,7 @@ class Cat048Decoder(AsterixDecoderBase):
         )
         record.items.append(item)
 
+        # TODO: SHA DE MIRAR SI ES VARIABLE
         return pos + 8
 
     def _decode_track_number(self, pos: int, record: Record) -> int:
@@ -290,10 +344,11 @@ class Cat048Decoder(AsterixDecoderBase):
         )
         record.items.append(item)
 
+        # TODO: SHA DE MIRAR SI ES VARIABLE
         return pos + 2
 
     def _decode_communications_acas(self, pos: int, record: Record) -> int:
-        """I048/230 - Communications/ACAS Capability (1 byte)"""
+        """I048/230 - Communications/ACAS Capability (2 byte)"""
         data=record.raw_data
         if pos + 1 > len(data):
             return pos
@@ -307,4 +362,4 @@ class Cat048Decoder(AsterixDecoderBase):
         )
         record.items.append(item)
 
-        return pos + 1
+        return pos + 2
