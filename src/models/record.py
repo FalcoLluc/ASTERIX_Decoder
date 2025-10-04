@@ -8,7 +8,7 @@ from src.types.enums import Category
 class Record:
     """Unified record model for ASTERIX data."""
     category: Category
-    length: int
+    length: int # Length of the raw_data
     raw_data: bytes
     block_offset: int # Inici Record Respecte Arxiu
     items: List[Item] = field(default_factory=list)

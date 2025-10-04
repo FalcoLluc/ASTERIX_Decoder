@@ -153,8 +153,6 @@ class Cat048Decoder(AsterixDecoderBase):
             frn=2,
             item_type=CAT048ItemType.TIME_OF_DAY,
             value={
-                "raw_bytes": list(time_bytes),
-                "time_128_seconds": time_128_seconds,
                 "total_seconds": total_seconds,
                 "time_string": time_str,
                 "hours": hours,
@@ -252,7 +250,6 @@ class Cat048Decoder(AsterixDecoderBase):
             frn=4,
             item_type=CAT048ItemType.MEASURED_POSITION_POLAR,
             value={
-                "raw_bytes": list(position_bytes),
                 "rho_256_nm": rho_256_nm,
                 "theta_units": theta_units,
                 "range_nm": range_nm,
@@ -350,7 +347,6 @@ class Cat048Decoder(AsterixDecoderBase):
                 "V": v,  # 0=validated, 1=not validated
                 "G": g,  # 0=default, 1=garbled
                 "flight_level": flight_level_value,  # In Flight Level units (hundreds of feet)
-                "flight_level_raw": flight_level_raw,
                 "altitude_feet": flight_level_value * 100  # Convert FL to feet
             }
         )
@@ -460,7 +456,6 @@ class Cat048Decoder(AsterixDecoderBase):
             value={
                 "aircraft_address": aircraft_address,
                 "aircraft_address_hex": aircraft_address_hex,
-                "raw_bytes": list(address_bytes)
             }
         )
         record.items.append(item)
@@ -512,7 +507,6 @@ class Cat048Decoder(AsterixDecoderBase):
             item_type=CAT048ItemType.AIRCRAFT_IDENTIFICATION,
             value={
                 "callsign": callsign,
-                "raw_bytes": list(id_bytes)
             }
         )
         record.items.append(item)
@@ -560,7 +554,6 @@ class Cat048Decoder(AsterixDecoderBase):
                 "bds_code": f"{bds1}{bds2}",
                 "bds1": bds1,
                 "bds2": bds2,
-                "raw_data": list(bds_data)
             }
 
             # Decode specific BDS registers
@@ -783,8 +776,6 @@ class Cat048Decoder(AsterixDecoderBase):
             value={
                 "ground_speed_kt": ground_speed_kt,
                 "heading_degrees": heading_degrees,
-                "speed_raw": speed_raw,
-                "heading_raw": heading_raw
             }
         )
         record.items.append(item)
