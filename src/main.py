@@ -1,42 +1,63 @@
+import time
+import logging
 from pathlib import Path
 from src.decoders.asterix_file_reader import AsterixFileReader
 from src.decoders.cat048_decoder import Cat048Decoder
 
 
 def main():
+    # ============================================================
+    # LOGGING CONFIGURATION - Change level here as needed
+    # ============================================================
+    LOG_LEVEL = logging.WARNING  # Change to DEBUG, INFO, WARNING, ERROR, or CRITICAL
+
+    logging.basicConfig(
+        level=LOG_LEVEL,
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    # Ensure all src.* loggers respect the same level
+    logging.getLogger("src").setLevel(LOG_LEVEL)
+
+    # ============================================================
+    # DECODING PROCESS
+    # ============================================================
     base_dir = Path(__file__).resolve().parent.parent
     file_path = base_dir / "data" / "samples" / "datos_asterix_radar.ast"
 
+    # Read records
     reader = AsterixFileReader(str(file_path))
     records = list(reader.read_records())
 
+    print(f"\n{'=' * 60}")
+    print(f"ASTERIX CAT048 Decoder")
+    print(f"{'=' * 60}")
+    print(f"Total records loaded: {len(records)}")
+    print(f"Before decoding: Record 0 has {len(records[0].items)} items")
+    print(f"{'=' * 60}\n")
+
+    # Initialize decoder
     decoder = Cat048Decoder()
 
-    print("First 10 records and their items:")
-    print("=" * 50)
+    # Decode with timing
+    start_time = time.perf_counter()  # Use perf_counter for better precision
 
-    for i, rec in enumerate(records[:1]):  # First 10 records
-        print(f"\nRecord {i}:")
-        print(f"  Block offset: {rec.block_offset}")
-        print(f"  Length: {rec.length} bytes")
-        print(f"  Raw data length: {len(rec.raw_data)} bytes")
+    for rec in records:
+        decoder.decode_record(rec)
 
-        # Parse FSPEC to see what items are present
-        fspec_items, data_start = decoder._parse_fspec(rec)
-        print(f"  Fspec items: {fspec_items}")
+    elapsed_time = time.perf_counter() - start_time
 
-        print(f"  Items in FSPEC ({len(fspec_items)}):")
-        for j, item_type in enumerate(fspec_items):
-            decoder_func = decoder.decoder_map.get(item_type)
-            #print(f"    {j + 1}. {item_type.name} -> {decoder_func.__name__}")
-
-        # Actually decode the record to see the values
-        decoded_record = decoder.decode_record(rec)
-        print(f"  Decoded items: {len(decoded_record.items)}")
-
-        # Show the actual decoded values for first few items
-        for k, item in enumerate(decoded_record.items):  # First 3 items
-            print(f"    {k + 1}. {item.item_type.name}: {item.value}")
+    # Results
+    print(f"\n{'=' * 60}")
+    print(f"Decoding Results")
+    print(f"{'=' * 60}")
+    print(f"After decoding: Record 0 has {len(records[0].items)} items")
+    print(f"\nPerformance Metrics:")
+    print(f"  Total time:          {elapsed_time:.4f} seconds")
+    print(f"  Time per record:     {elapsed_time / len(records) * 1000:.3f} ms")
+    print(f"  Throughput:          {len(records) / elapsed_time:.2f} records/sec")
+    print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

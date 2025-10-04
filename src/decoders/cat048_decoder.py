@@ -11,6 +11,7 @@ BDS 4.0, 5.0, 6.0
 
 class Cat048Decoder(AsterixDecoderBase):
     def __init__(self):
+        super().__init__()
         # Map FSPEC bits (item types) to decoding methods
         self.decoder_map = {
             CAT048ItemType.DATA_SOURCE_IDENTIFIER: self._decode_data_source,
@@ -39,7 +40,9 @@ class Cat048Decoder(AsterixDecoderBase):
     def decode_record(self, record: Record) -> Record:
         """Main decoding method"""
         # Parse FSPEC to get list of items in order
+        self.logger.debug("Starting decode_record: offset=%s, raw_len=%s", getattr(record, 'block_offset', None), len(record.raw_data))
         fspec_items, data_start = self._parse_fspec(record)
+        self.logger.debug("Parsed FSPEC: %d items, data_start=%d", len(fspec_items), data_start)
 
         # Initialize pointer to data after FSPEC
         data_pointer = data_start
@@ -51,7 +54,7 @@ class Cat048Decoder(AsterixDecoderBase):
                 # Each decoder returns the new data pointer position
                 data_pointer = decoder_func(data_pointer, record)
             else:
-                print(f"Warning: No decoder for CAT048 item {item_type}")
+                self.logger.warning("No decoder for CAT048 item %s", item_type)
                 # Skip this item - we need to know its length to continue
                 # For now, break (we'll implement proper length detection)
                 break
@@ -88,7 +91,7 @@ class Cat048Decoder(AsterixDecoderBase):
                         # We'll handle this by stopping at FRN 21
                         pass
 
-                # frn will be increasing, but only if AND is successfully an item is added
+                # frn will always be increasing, but only when AND is successful, an item is added
                 frn += 1
 
             # Check FX bit - if 0, this is the last FSPEC byte
@@ -625,43 +628,45 @@ class Cat048Decoder(AsterixDecoderBase):
         # Convert to 56-bit integer
         bds_value = int.from_bytes(bds_data, byteorder='big')
 
-        # Roll Angle (bits 56-46, 11 bits)
-        roll_status = (bds_value >> 55) & 0x01
+        # Roll Angle (bits 1-11: status + sign + 9 data)
+        roll_status = (bds_value >> 55) & 0x01  # bit 56 (actual bit 1)
         if roll_status:
-            roll_raw = (bds_value >> 45) & 0x03FF  # 10 bits, signed
-            if roll_raw & 0x0200:  # Check sign bit
+            roll_raw = (bds_value >> 45) & 0x03FF  # bits 55-46 (actual bits 2-11: sign + 9 data)
+            if roll_raw & 0x0200:  # Check sign bit (10-bit field)
                 roll_raw = roll_raw - 0x0400
-            roll_angle = roll_raw * 45.0 / 256.0  # LSB = 45/256 degrees
+            roll_angle = roll_raw * 45.0 / 256.0
             result["roll_angle_deg"] = roll_angle
 
-        # True Track Angle (bits 45-35, 11 bits)
-        track_status = (bds_value >> 44) & 0x01
+        # True Track Angle (bits 12-23: status + sign + 10 data) - 12 bits total!
+        track_status = (bds_value >> 44) & 0x01  # bit 45 (actual bit 12)
         if track_status:
-            track_raw = (bds_value >> 34) & 0x03FF  # 10 bits
-            track_angle = track_raw * 90.0 / 512.0  # LSB = 90/512 degrees
+            track_raw = (bds_value >> 33) & 0x07FF  # bits 44-34 (actual bits 13-23: sign + 10 data) - FIXED to 11 bits!
+            if track_raw & 0x0400:  # Check sign bit (11-bit field)
+                track_raw = track_raw - 0x0800  # Two's complement for 11 bits
+            track_angle = track_raw * 90.0 / 512.0
             result["true_track_angle_deg"] = track_angle
 
-        # Ground Speed (bits 34-24, 11 bits)
-        gs_status = (bds_value >> 33) & 0x01
+        # Ground Speed (bits 24-34: status + 10 data)
+        gs_status = (bds_value >> 32) & 0x01  # bit 33 (actual bit 24) - FIXED
         if gs_status:
-            gs_raw = (bds_value >> 23) & 0x03FF  # 10 bits
-            ground_speed = gs_raw * 2  # LSB = 2 knots
+            gs_raw = (bds_value >> 22) & 0x03FF  # bits 32-23 (actual bits 25-34: 10 data) - FIXED
+            ground_speed = gs_raw * 2
             result["ground_speed_kt"] = ground_speed
 
-        # Track Angle Rate (bits 23-14, 10 bits)
-        tar_status = (bds_value >> 22) & 0x01
+        # Track Angle Rate (bits 35-45: status + sign + 9 data)
+        tar_status = (bds_value >> 21) & 0x01  # bit 22 (actual bit 35) - FIXED
         if tar_status:
-            tar_raw = (bds_value >> 13) & 0x01FF  # 9 bits, signed
-            if tar_raw & 0x0100:  # Check sign bit
-                tar_raw = tar_raw - 0x0200
-            track_rate = tar_raw * 8.0 / 256.0  # LSB = 8/256 degrees/second
+            tar_raw = (bds_value >> 11) & 0x03FF  # bits 21-12 (actual bits 36-45: sign + 9 data) - FIXED to 10 bits!
+            if tar_raw & 0x0200:  # Check sign bit (10-bit field)
+                tar_raw = tar_raw - 0x0400
+            track_rate = tar_raw * 8.0 / 256.0
             result["track_angle_rate_deg_s"] = track_rate
 
-        # True Airspeed (bits 13-3, 11 bits)
-        tas_status = (bds_value >> 12) & 0x01
+        # True Airspeed (bits 46-56: status + 10 data)
+        tas_status = (bds_value >> 10) & 0x01  # bit 11 (actual bit 46) - FIXED
         if tas_status:
-            tas_raw = (bds_value >> 2) & 0x03FF  # 10 bits
-            true_airspeed = tas_raw * 2  # LSB = 2 knots
+            tas_raw = (bds_value >> 0) & 0x03FF  # bits 10-1 (actual bits 47-56: 10 data) - FIXED
+            true_airspeed = tas_raw * 2
             result["true_airspeed_kt"] = true_airspeed
 
         return result
@@ -670,48 +675,50 @@ class Cat048Decoder(AsterixDecoderBase):
         """Decode BDS 6.0 - Heading and speed report"""
         result = {"bds_type": "6.0 - Heading and Speed Report"}
 
-        # Convert to 56-bit integer
+        # Convert to 56-bit integer (bit 56 = MSB at shift position 55, bit 1 = LSB at position 0)
         bds_value = int.from_bytes(bds_data, byteorder='big')
 
-        # Magnetic Heading (bits 56-46, 11 bits)
-        mag_heading_status = (bds_value >> 55) & 0x01
+        # Magnetic Heading (bits 1-12: status + sign + 10 data)
+        mag_heading_status = (bds_value >> 55) & 0x01  # bit 56 (actual bit 1)
         if mag_heading_status:
-            mag_heading_raw = (bds_value >> 45) & 0x03FF  # 10 bits
-            # Sign bit for magnetic heading
-            if mag_heading_raw & 0x0200:
-                mag_heading_raw = mag_heading_raw - 0x0400
+            mag_heading_raw = (bds_value >> 45) & 0x07FF  # bits 55-45 (actual bits 2-12: sign + 10 data)
+            # Check sign bit (bit 55 = actual bit 2)
+            if mag_heading_raw & 0x0400:  # bit 10 of the 11-bit field
+                mag_heading_raw = mag_heading_raw - 0x0800  # Convert from 11-bit two's complement
             mag_heading = mag_heading_raw * 90.0 / 512.0  # LSB = 90/512 degrees
             result["magnetic_heading_deg"] = mag_heading
 
-        # Indicated Airspeed (bits 45-35, 11 bits)
-        ias_status = (bds_value >> 44) & 0x01
+        # Indicated Airspeed (bits 13-23: status + 10 data)
+        ias_status = (bds_value >> 43) & 0x01  # bit 44 (actual bit 13)
         if ias_status:
-            ias_raw = (bds_value >> 34) & 0x03FF  # 10 bits
+            ias_raw = (bds_value >> 33) & 0x03FF  # bits 43-34 (actual bits 14-23: 10 data bits)
             indicated_airspeed = ias_raw  # LSB = 1 knot
             result["indicated_airspeed_kt"] = indicated_airspeed
 
-        # Mach Number (bits 34-24, 11 bits)
-        mach_status = (bds_value >> 33) & 0x01
+        # Mach Number (bits 24-34: status + 10 data)
+        mach_status = (bds_value >> 32) & 0x01  # bit 33 (actual bit 24)
         if mach_status:
-            mach_raw = (bds_value >> 23) & 0x03FF  # 10 bits
-            mach_number = mach_raw * 0.008  # LSB = 0.008 (2.048/256)
+            mach_raw = (bds_value >> 22) & 0x03FF  # bits 32-23 (actual bits 25-34: 10 data bits)
+            mach_number = mach_raw * (2.048 / 512.0)  # LSB = 2.048/512 = 0.004
             result["mach_number"] = mach_number
 
-        # Barometric Altitude Rate (bits 23-14, 10 bits)
-        baro_rate_status = (bds_value >> 22) & 0x01
+        # Barometric Altitude Rate (bits 35-45: status + sign + 9 data)
+        baro_rate_status = (bds_value >> 21) & 0x01  # bit 22 (actual bit 35)
         if baro_rate_status:
-            baro_rate_raw = (bds_value >> 13) & 0x01FF  # 9 bits, signed
-            if baro_rate_raw & 0x0100:  # Check sign bit
-                baro_rate_raw = baro_rate_raw - 0x0200
+            baro_rate_raw = (bds_value >> 11) & 0x03FF  # bits 21-12 (actual bits 36-45: sign + 9 data)
+            # Check sign bit (bit 21 = actual bit 36)
+            if baro_rate_raw & 0x0200:  # bit 9 of the 10-bit field
+                baro_rate_raw = baro_rate_raw - 0x0400  # Convert from 10-bit two's complement
             baro_rate = baro_rate_raw * 32  # LSB = 32 ft/min
             result["barometric_altitude_rate_ft_min"] = baro_rate
 
-        # Inertial Vertical Velocity (bits 13-3, 11 bits)
-        ivv_status = (bds_value >> 12) & 0x01
+        # Inertial Vertical Velocity (bits 46-56: status + sign + 9 data)
+        ivv_status = (bds_value >> 10) & 0x01  # bit 11 (actual bit 46)
         if ivv_status:
-            ivv_raw = (bds_value >> 2) & 0x03FF  # 10 bits, signed
-            if ivv_raw & 0x0200:  # Check sign bit
-                ivv_raw = ivv_raw - 0x0400
+            ivv_raw = (bds_value >> 0) & 0x03FF  # bits 10-1 (actual bits 47-56: sign + 9 data)
+            # Check sign bit (bit 10 = actual bit 47)
+            if ivv_raw & 0x0200:  # bit 9 of the 10-bit field
+                ivv_raw = ivv_raw - 0x0400  # Convert from 10-bit two's complement
             inertial_vv = ivv_raw * 32  # LSB = 32 ft/min
             result["inertial_vertical_velocity_ft_min"] = inertial_vv
 

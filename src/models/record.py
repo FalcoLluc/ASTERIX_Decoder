@@ -11,4 +11,4 @@ class Record:
     length: int
     raw_data: bytes
     block_offset: int # Inici Record Respecte Arxiu
-    items: List[Item]
+    items: List[Item] = field(default_factory=list)
