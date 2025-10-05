@@ -55,8 +55,6 @@ class Cat048Decoder(AsterixDecoderBase):
                 data_pointer = decoder_func(data_pointer, record)
             else:
                 self.logger.warning("No decoder for CAT048 item %s", item_type)
-                # Skip this item - we need to know its length to continue
-                # For now, break (we'll implement proper length detection)
                 break
 
         return record
@@ -144,9 +142,6 @@ class Cat048Decoder(AsterixDecoderBase):
         minutes = int((total_seconds % 3600) // 60)
         seconds = total_seconds % 60
 
-        # Format as time string
-        time_str = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
-
         item = Item(
             item_offset=pos,
             length=3,
@@ -154,7 +149,6 @@ class Cat048Decoder(AsterixDecoderBase):
             item_type=CAT048ItemType.TIME_OF_DAY,
             value={
                 "total_seconds": total_seconds,
-                "time_string": time_str,
                 "hours": hours,
                 "minutes": minutes,
                 "seconds": seconds
@@ -250,11 +244,8 @@ class Cat048Decoder(AsterixDecoderBase):
             frn=4,
             item_type=CAT048ItemType.MEASURED_POSITION_POLAR,
             value={
-                "rho_256_nm": rho_256_nm,
-                "theta_units": theta_units,
-                "range_nm": range_nm,
-                "angle_degrees": theta_degrees,
-                "formatted": f"Range: {range_nm:.3f} NM, Angle: {theta_degrees:.3f}°"
+                "RHO_nm": range_nm,
+                "THETA_degrees": theta_degrees,
             }
         )
 
@@ -299,8 +290,7 @@ class Cat048Decoder(AsterixDecoderBase):
                 "V": v,  # 0=validated, 1=not validated
                 "G": g,  # 0=default, 1=garbled
                 "L": l,  # 0=derived from transponder, 1=smoothed/not extracted
-                "mode_3a_code": mode_3a_octal,
-                "mode_3a_raw": mode_3a_raw,
+                "Mode3/A": mode_3a_octal,
                 "A": a,
                 "B": b,
                 "C": c,
@@ -346,7 +336,7 @@ class Cat048Decoder(AsterixDecoderBase):
             value={
                 "V": v,  # 0=validated, 1=not validated
                 "G": g,  # 0=default, 1=garbled
-                "flight_level": flight_level_value,  # In Flight Level units (hundreds of feet)
+                "FL": flight_level_value,  # In Flight Level units (hundreds of feet)
                 "altitude_feet": flight_level_value * 100  # Convert FL to feet
             }
         )
@@ -506,7 +496,7 @@ class Cat048Decoder(AsterixDecoderBase):
             frn=9,
             item_type=CAT048ItemType.AIRCRAFT_IDENTIFICATION,
             value={
-                "callsign": callsign,
+                "TI": callsign,
             }
         )
         record.items.append(item)
@@ -586,7 +576,7 @@ class Cat048Decoder(AsterixDecoderBase):
 
     def _decode_bds_40(self, bds_data: bytes) -> dict:
         """Decode BDS 4.0 - Selected vertical intention"""
-        result = {"bds_type": "4.0 - Selected Vertical Intention"}
+        result = {}
 
         # Convert to 56-bit integer
         bds_value = int.from_bytes(bds_data, byteorder='big')
@@ -596,27 +586,27 @@ class Cat048Decoder(AsterixDecoderBase):
         if mcp_fcu_status:
             mcp_fcu_alt_raw = (bds_value >> 43) & 0x0FFF  # 12 bits
             mcp_fcu_alt = mcp_fcu_alt_raw * 16  # LSB = 16 ft
-            result["MCP_FCU_altitude_ft"] = mcp_fcu_alt
+            result["MCP_FCU_ALT_ft"] = mcp_fcu_alt
 
         # FMS Selected Altitude (bits 43-31, 13 bits)
         fms_status = (bds_value >> 42) & 0x01
         if fms_status:
             fms_alt_raw = (bds_value >> 30) & 0x0FFF  # 12 bits
             fms_alt = fms_alt_raw * 16  # LSB = 16 ft
-            result["FMS_altitude_ft"] = fms_alt
+            result["FMS_ALT_ft"] = fms_alt
 
         # Barometric Pressure Setting (bits 30-18, 13 bits)
         baro_status = (bds_value >> 29) & 0x01
         if baro_status:
             baro_raw = (bds_value >> 17) & 0x0FFF  # 12 bits
             baro_setting = baro_raw * 0.1 + 800  # LSB = 0.1 mb, offset 800 mb
-            result["barometric_pressure_mb"] = baro_setting
+            result["BP_mb"] = baro_setting
 
         return result
 
     def _decode_bds_50(self, bds_data: bytes) -> dict:
         """Decode BDS 5.0 - Track and turn report"""
-        result = {"bds_type": "5.0 - Track and Turn Report"}
+        result = {}
 
         # Convert to 56-bit integer
         bds_value = int.from_bytes(bds_data, byteorder='big')
@@ -628,7 +618,7 @@ class Cat048Decoder(AsterixDecoderBase):
             if roll_raw & 0x0200:  # Check sign bit (10-bit field)
                 roll_raw = roll_raw - 0x0400
             roll_angle = roll_raw * 45.0 / 256.0
-            result["roll_angle_deg"] = roll_angle
+            result["RA_deg"] = roll_angle
 
         # True Track Angle (bits 12-23: status + sign + 10 data) - 12 bits total!
         track_status = (bds_value >> 44) & 0x01  # bit 45 (actual bit 12)
@@ -637,14 +627,14 @@ class Cat048Decoder(AsterixDecoderBase):
             if track_raw & 0x0400:  # Check sign bit (11-bit field)
                 track_raw = track_raw - 0x0800  # Two's complement for 11 bits
             track_angle = track_raw * 90.0 / 512.0
-            result["true_track_angle_deg"] = track_angle
+            result["TTA_deg"] = track_angle
 
         # Ground Speed (bits 24-34: status + 10 data)
         gs_status = (bds_value >> 32) & 0x01  # bit 33 (actual bit 24) - FIXED
         if gs_status:
             gs_raw = (bds_value >> 22) & 0x03FF  # bits 32-23 (actual bits 25-34: 10 data) - FIXED
             ground_speed = gs_raw * 2
-            result["ground_speed_kt"] = ground_speed
+            result["GS_kt"] = ground_speed
 
         # Track Angle Rate (bits 35-45: status + sign + 9 data)
         tar_status = (bds_value >> 21) & 0x01  # bit 22 (actual bit 35) - FIXED
@@ -653,20 +643,20 @@ class Cat048Decoder(AsterixDecoderBase):
             if tar_raw & 0x0200:  # Check sign bit (10-bit field)
                 tar_raw = tar_raw - 0x0400
             track_rate = tar_raw * 8.0 / 256.0
-            result["track_angle_rate_deg_s"] = track_rate
+            result["TAR_deg_s"] = track_rate
 
         # True Airspeed (bits 46-56: status + 10 data)
         tas_status = (bds_value >> 10) & 0x01  # bit 11 (actual bit 46) - FIXED
         if tas_status:
             tas_raw = (bds_value >> 0) & 0x03FF  # bits 10-1 (actual bits 47-56: 10 data) - FIXED
             true_airspeed = tas_raw * 2
-            result["true_airspeed_kt"] = true_airspeed
+            result["TAS_kt"] = true_airspeed
 
         return result
 
     def _decode_bds_60(self, bds_data: bytes) -> dict:
         """Decode BDS 6.0 - Heading and speed report"""
-        result = {"bds_type": "6.0 - Heading and Speed Report"}
+        result = {}
 
         # Convert to 56-bit integer (bit 56 = MSB at shift position 55, bit 1 = LSB at position 0)
         bds_value = int.from_bytes(bds_data, byteorder='big')
@@ -679,21 +669,21 @@ class Cat048Decoder(AsterixDecoderBase):
             if mag_heading_raw & 0x0400:  # bit 10 of the 11-bit field
                 mag_heading_raw = mag_heading_raw - 0x0800  # Convert from 11-bit two's complement
             mag_heading = mag_heading_raw * 90.0 / 512.0  # LSB = 90/512 degrees
-            result["magnetic_heading_deg"] = mag_heading
+            result["MG_HDG_deg"] = mag_heading
 
         # Indicated Airspeed (bits 13-23: status + 10 data)
         ias_status = (bds_value >> 43) & 0x01  # bit 44 (actual bit 13)
         if ias_status:
             ias_raw = (bds_value >> 33) & 0x03FF  # bits 43-34 (actual bits 14-23: 10 data bits)
             indicated_airspeed = ias_raw  # LSB = 1 knot
-            result["indicated_airspeed_kt"] = indicated_airspeed
+            result["IAS_kt"] = indicated_airspeed
 
         # Mach Number (bits 24-34: status + 10 data)
         mach_status = (bds_value >> 32) & 0x01  # bit 33 (actual bit 24)
         if mach_status:
             mach_raw = (bds_value >> 22) & 0x03FF  # bits 32-23 (actual bits 25-34: 10 data bits)
             mach_number = mach_raw * (2.048 / 512.0)  # LSB = 2.048/512 = 0.004
-            result["mach_number"] = mach_number
+            result["MACH"] = mach_number
 
         # Barometric Altitude Rate (bits 35-45: status + sign + 9 data)
         baro_rate_status = (bds_value >> 21) & 0x01  # bit 22 (actual bit 35)
@@ -703,7 +693,7 @@ class Cat048Decoder(AsterixDecoderBase):
             if baro_rate_raw & 0x0200:  # bit 9 of the 10-bit field
                 baro_rate_raw = baro_rate_raw - 0x0400  # Convert from 10-bit two's complement
             baro_rate = baro_rate_raw * 32  # LSB = 32 ft/min
-            result["barometric_altitude_rate_ft_min"] = baro_rate
+            result["BAR_RATE_ft_min"] = baro_rate
 
         # Inertial Vertical Velocity (bits 46-56: status + sign + 9 data)
         ivv_status = (bds_value >> 10) & 0x01  # bit 11 (actual bit 46)
@@ -713,7 +703,7 @@ class Cat048Decoder(AsterixDecoderBase):
             if ivv_raw & 0x0200:  # bit 9 of the 10-bit field
                 ivv_raw = ivv_raw - 0x0400  # Convert from 10-bit two's complement
             inertial_vv = ivv_raw * 32  # LSB = 32 ft/min
-            result["inertial_vertical_velocity_ft_min"] = inertial_vv
+            result["IVV_ft_min"] = inertial_vv
 
         return result
 
@@ -736,7 +726,7 @@ class Cat048Decoder(AsterixDecoderBase):
             length=2,
             frn=11,
             item_type=CAT048ItemType.TRACK_NUMBER,
-            value={"track_number": track_number}
+            value={"TN": track_number}
         )
         record.items.append(item)
 
@@ -774,8 +764,8 @@ class Cat048Decoder(AsterixDecoderBase):
             frn=13,
             item_type=CAT048ItemType.TRACK_VELOCITY_POLAR,
             value={
-                "ground_speed_kt": ground_speed_kt,
-                "heading_degrees": heading_degrees,
+                "GS_kt": ground_speed_kt,
+                "HDG_degrees": heading_degrees,
             }
         )
         record.items.append(item)

@@ -5,6 +5,7 @@ from src.models.record import Record
 class Cat021Decoder(AsterixDecoderBase):
     def __init__(self):
         # Map FSPEC bits (item types) to decoding methods
+        super().__init__()
         self.FSPEC_TO_DECODER = {
             CAT021ItemType.TARGET_REPORT_DESCRIPTOR: self._decode_target_report_descriptor,
             CAT021ItemType.TRACK_NUMBER: self._decode_track_number,
