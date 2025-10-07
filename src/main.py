@@ -3,7 +3,6 @@ import logging
 from pathlib import Path
 from src.decoders.asterix_file_reader import AsterixFileReader
 from src.decoders.cat048_decoder import Cat048Decoder
-from src.utils.csv_exporter import Cat048CSVExporter, Cat048AnalysisHelper
 
 
 def main():
@@ -60,58 +59,7 @@ def main():
     print(f"  Throughput:          {len(records) / elapsed_time:.2f} records/sec")
     print(f"{'=' * 60}\n")
 
-    # ============================================================
-    # CONVERT TO PANDAS DATAFRAME
-    # ============================================================
-    print("Converting to pandas DataFrame...")
-    df = Cat048CSVExporter.records_to_dataframe(records)
-
-    print(f"DataFrame created: {len(df)} rows x {len(df.columns)} columns")
-    print(f"\nColumns: {', '.join(df.columns.tolist())}")
-
-
-    # ============================================================
-    # STATISTICS
-    # ============================================================
-    print(f"\n{'=' * 60}")
-    print("Dataset Statistics:")
-    print(f"{'=' * 60}")
-    stats = Cat048AnalysisHelper.get_statistics(df)
-    for key, value in stats.items():
-        print(f"{key:25s}: {value}")
-
-    # ============================================================
-    # EXAMPLE FILTERS
-    # ============================================================
-    print(f"\n{'=' * 60}")
-    print("Example Filters:")
-    print(f"{'=' * 60}")
-
-    # Airborne aircraft
-    airborne = Cat048AnalysisHelper.filter_airborne(df)
-    print(f"Airborne aircraft: {len(airborne)}")
-
-    # Aircraft above FL300
-    high_altitude = Cat048AnalysisHelper.filter_by_altitude(df, min_fl=300)
-    print(f"Aircraft above FL300: {len(high_altitude)}")
-
-    # Ryanair flights
-    ryanair = Cat048AnalysisHelper.filter_by_callsign(df, 'RYR')
-    print(f"Ryanair flights: {len(ryanair)}")
-
-    # ============================================================
-    # EXPORT TO CSV
-    # ============================================================
-    output_dir = base_dir / "data" / "output"
-    output_dir.mkdir(exist_ok=True)
-
-    output_file = output_dir / "cat048_decoded.csv"
-    Cat048CSVExporter.export_to_csv(records, str(output_file))
-
-    print(f"\n{'=' * 60}")
-    print(f"CSV exported to: {output_file}")
-    print(f"{'=' * 60}\n")
-
+    print(records[0].items)
 
 if __name__ == "__main__":
     main()

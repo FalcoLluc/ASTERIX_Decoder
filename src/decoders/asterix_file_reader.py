@@ -26,7 +26,16 @@ class AsterixFileReader:
                     try:
                         category = Category(category_int)
                     except ValueError:
-                        # Skip unsupported categories
+                        # Skip unsupported categories by reading length and advancing position
+                        if position + 1 >= file_size:
+                            break
+                        length_bytes = mmapped_file[position:position + 2]
+                        length = int.from_bytes(length_bytes, byteorder="big")
+                        position += 2
+                        if length < 3 or position + (length - 3) > file_size:
+                            break
+                        # Skip payload of unsupported category
+                        position += (length - 3)
                         continue
 
                     # Read length (2 bytes, big-endian)
