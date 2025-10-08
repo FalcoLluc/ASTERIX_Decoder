@@ -2,13 +2,15 @@ import pandas as pd
 from typing import List
 from src.models.record import Record
 from src.types.enums import CAT048ItemType
+from src.utils.cat048_corrections import QNHCorrector
 
 
 class Cat048CSVExporter:
     """Export CAT048 decoded records to pandas DataFrame with one row per record"""
+    def __init__(self):
+        self._qnh = QNHCorrector()
 
-    @staticmethod
-    def records_to_dataframe(records: List[Record]) -> pd.DataFrame:
+    def records_to_dataframe(self, records: List[Record]) -> pd.DataFrame:
         """
         Convert list of Record objects to a pandas DataFrame.
         Each row represents ONE record with all fields flattened.
@@ -16,14 +18,17 @@ class Cat048CSVExporter:
         rows = []
 
         for record in records:
-            # Start with base record info
             row = {
                 'CAT': record.category.value,
                 'SAC': None,
                 'SIC': None,
             }
 
-            # Extract all items and flatten into single row
+            # Collect inputs for QNH correction
+            ta_hex = None
+            fl = None
+            bp = None
+
             for item in record.items:
                 item_type = item.item_type
                 value = item.value
@@ -54,6 +59,7 @@ class Cat048CSVExporter:
                     row['FL'] = value.get('FL')
                     row['FL_V'] = value.get('V')
                     row['FL_G'] = value.get('G')
+                    fl = value.get('FL')
 
                 elif item_type == CAT048ItemType.RADAR_PLOT_CHARACTERISTICS:
                     row['SRL'] = value.get('SRL')
@@ -61,7 +67,8 @@ class Cat048CSVExporter:
                     row['SAM'] = value.get('SAM')
 
                 elif item_type == CAT048ItemType.AIRCRAFT_ADDRESS:
-                    row['TA'] = value.get('aircraft_address_hex')
+                    ta_hex = value.get('aircraft_address_hex')
+                    row['TA'] = ta_hex
 
                 elif item_type == CAT048ItemType.AIRCRAFT_IDENTIFICATION:
                     row['TI'] = value.get('TI')
@@ -70,8 +77,6 @@ class Cat048CSVExporter:
                     row['TN'] = value.get('TN')
 
                 elif item_type == CAT048ItemType.TRACK_VELOCITY_POLAR:
-                    # Note: This provides calculated GS and HDG
-                    # Might conflict with BDS data, use prefix
                     row['CALC_GS'] = value.get('GS_kt')
                     row['CALC_HDG'] = value.get('HDG_degrees')
 
@@ -86,7 +91,6 @@ class Cat048CSVExporter:
                     row['STAT_DESC'] = value.get('STAT_description')
 
                 elif item_type == CAT048ItemType.MODE_S_MB_DATA:
-                    # Flatten all BDS registers into the same row
                     bds_registers = value.get('bds_registers', [])
                     for bds_reg in bds_registers:
                         # BDS 4.0 fields
@@ -95,7 +99,8 @@ class Cat048CSVExporter:
                         if 'FMS_ALT_ft' in bds_reg:
                             row['FMS_ALT'] = bds_reg['FMS_ALT_ft']
                         if 'BP_mb' in bds_reg:
-                            row['BP'] = bds_reg['BP_mb']
+                            bp = bds_reg['BP_mb']
+                            row['BP'] = bp
 
                         # BDS 5.0 fields
                         if 'RA_deg' in bds_reg:
@@ -121,42 +126,43 @@ class Cat048CSVExporter:
                         if 'IVV_ft_min' in bds_reg:
                             row['IVV'] = bds_reg['IVV_ft_min']
 
+            # Apply QNH correction at the end of parsing the record
+            alt_qnh_ft, corrected = self._qnh.correct(ta_hex, fl, bp)
+            if alt_qnh_ft is not None:
+                row['ALT_QNH_ft'] = alt_qnh_ft
+                row['QNH_CORRECTED'] = corrected
+
             rows.append(row)
 
-        # Create DataFrame
         df = pd.DataFrame(rows)
 
-        # Define column order to match your CSV
         column_order = [
             'CAT', 'SAC', 'SIC', 'Time', 'TYP', 'SIM', 'SPI',
             'RHO', 'THETA', 'Mode3/A', 'V', 'G', 'L',
-            'FL', 'FL_V', 'FL_G',
+            'FL', 'ALT_QNH_ft', 'QNH_CORRECTED', 'FL_V', 'FL_G',
             'SRL', 'SRR', 'SAM',
             'TA', 'TI', 'TN',
             'CALC_GS', 'CALC_HDG',
             'CNF', 'RAD', 'CDM',
             'COM', 'STAT', 'STAT_DESC',
-            # BDS 4.0
             'MCP_FCU_ALT', 'FMS_ALT', 'BP',
-            # BDS 5.0
             'RA', 'TTA', 'GS', 'TAR', 'TAS',
-            # BDS 6.0
             'HDG', 'IAS', 'MACH', 'BAR', 'IVV'
         ]
 
-        # Reorder columns (only include existing columns)
+        # Reorder columns (only include existing columns first, then keep any extras)
         existing_columns = [col for col in column_order if col in df.columns]
-        df = df[existing_columns]
-
+        remaining = [c for c in df.columns if c not in existing_columns]
+        df = df[existing_columns + remaining]
         return df
 
     @staticmethod
     def export_to_csv(records: List[Record], output_path: str):
         """Export records directly to CSV file"""
-        df = Cat048CSVExporter.records_to_dataframe(records)
+        exporter = Cat048CSVExporter()
+        df = exporter.records_to_dataframe(records)
         df.to_csv(output_path, index=False, na_rep='N/A')
         return df
-
 
 class Cat048AnalysisHelper:
     """Helper methods for filtering and analyzing CAT048 data"""
