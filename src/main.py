@@ -114,8 +114,5 @@ def main():
     print(f"CSV exported to: {output_csv}")
     print(f"{'=' * 60}\n")
 
-    print([i.item_type for i in records[4].items])
-
-
 if __name__ == "__main__":
     main()
