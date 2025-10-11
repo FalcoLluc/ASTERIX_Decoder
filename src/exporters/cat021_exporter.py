@@ -62,6 +62,7 @@ class Cat021Exporter:
 
         df = pd.DataFrame(rows)
 
+        # Define column order
         column_order = [
             'CAT', 'SAC', 'SIC', 'Time',
             'ATP', 'ARC', 'RC', 'RAB', 'DCR', 'GBS', 'SIM', 'TST',
@@ -69,11 +70,21 @@ class Cat021Exporter:
             'TA',
             'Mode3/A',
             'FL', 'ALT_ft',
+            'ALT_QNH_ft',  # ✅ Pre-create for preprocessor
+            'QNH_CORRECTED',  # ✅ Pre-create for preprocessor
             'TI',
             'BP'
         ]
 
-        existing_columns = [col for col in column_order if col in df.columns]
-        df = df[existing_columns]
+        # Add missing QNH columns if not present (will be filled by preprocessor)
+        for col in ['ALT_QNH_ft', 'QNH_CORRECTED']:
+            if col not in df.columns:
+                df[col] = None
 
-        return df
+        # Reorder columns (only include existing columns)
+        existing_columns = [col for col in column_order if col in df.columns]
+
+        # Add any remaining columns not in order
+        remaining = [col for col in df.columns if col not in existing_columns]
+
+        return df[existing_columns + remaining]
