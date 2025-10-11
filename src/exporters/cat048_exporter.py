@@ -4,7 +4,7 @@ from src.models.record import Record
 from src.types.enums import CAT048ItemType
 
 
-class Cat048CSVExporter:
+class Cat048Exporter:
     """Export CAT048 decoded records to pandas DataFrame with one row per record"""
 
     @staticmethod
@@ -70,8 +70,6 @@ class Cat048CSVExporter:
                     row['TN'] = value.get('TN')
 
                 elif item_type == CAT048ItemType.TRACK_VELOCITY_POLAR:
-                    # Note: This provides calculated GS and HDG
-                    # Might conflict with BDS data, use prefix
                     row['CALC_GS'] = value.get('GS_kt')
                     row['CALC_HDG'] = value.get('HDG_degrees')
 
@@ -86,7 +84,6 @@ class Cat048CSVExporter:
                     row['STAT_DESC'] = value.get('STAT_description')
 
                 elif item_type == CAT048ItemType.MODE_S_MB_DATA:
-                    # Flatten all BDS registers into the same row
                     bds_registers = value.get('bds_registers', [])
                     for bds_reg in bds_registers:
                         # BDS 4.0 fields
@@ -126,85 +123,62 @@ class Cat048CSVExporter:
         # Create DataFrame
         df = pd.DataFrame(rows)
 
-        # Define column order to match your CSV
+        # Define column order (includes QNH columns for preprocessor)
         column_order = [
-            'CAT', 'SAC', 'SIC', 'Time', 'TYP', 'SIM', 'SPI',
-            'RHO', 'THETA', 'Mode3/A', 'V', 'G', 'L',
+            # Basic identifiers
+            'CAT', 'SAC', 'SIC', 'Time',
+
+            # Position (LAT/LON added by WGS84 conversion)
+            'LAT', 'LON',
+
+            # Target descriptor
+            'TYP', 'SIM', 'SPI',
+
+            # Polar coordinates
+            'RHO', 'THETA',
+
+            # Mode 3/A
+            'Mode3/A', 'V', 'G', 'L',
+
+            # Flight level & altitude
             'FL', 'FL_V', 'FL_G',
+            'ALT_QNH_ft',  # Pre-create for preprocessor
+            'QNH_CORRECTED',  # Pre-create for preprocessor
+
+            # Radar characteristics
             'SRL', 'SRR', 'SAM',
+
+            # Aircraft identification
             'TA', 'TI', 'TN',
-            'CALC_GS', 'CALC_HDG',
-            'CNF', 'RAD', 'CDM',
-            'COM', 'STAT', 'STAT_DESC',
+
             # BDS 4.0
-            'MCP_FCU_ALT', 'FMS_ALT', 'BP',
+            'BP', 'MCP_FCU_ALT', 'FMS_ALT',
+
             # BDS 5.0
             'RA', 'TTA', 'GS', 'TAR', 'TAS',
+
             # BDS 6.0
-            'HDG', 'IAS', 'MACH', 'BAR', 'IVV'
+            'HDG', 'IAS', 'MACH', 'BAR', 'IVV',
+
+            # Calculated velocity
+            'CALC_GS', 'CALC_HDG',
+
+            # Track status
+            'CNF', 'RAD', 'CDM',
+
+            # Communications/ACAS
+            'COM', 'STAT', 'STAT_DESC'
         ]
+
+        # Add missing QNH columns if not present (will be filled by preprocessor)
+        for col in ['ALT_QNH_ft', 'QNH_CORRECTED', 'LAT', 'LON']:
+            if col not in df.columns:
+                df[col] = None
 
         # Reorder columns (only include existing columns)
         existing_columns = [col for col in column_order if col in df.columns]
-        df = df[existing_columns]
 
-        return df
+        # Add any remaining columns not in the predefined order
+        remaining = [col for col in df.columns if col not in existing_columns]
 
-    @staticmethod
-    def export_to_csv(records: List[Record], output_path: str):
-        """Export records directly to CSV file"""
-        df = Cat048CSVExporter.records_to_dataframe(records)
-        df.to_csv(output_path, index=False, na_rep='N/A')
-        return df
-
-
-class Cat048AnalysisHelper:
-    """Helper methods for filtering and analyzing CAT048 data"""
-
-    @staticmethod
-    def filter_airborne(df: pd.DataFrame) -> pd.DataFrame:
-        """Filter for airborne aircraft (STAT = 0 or 2)"""
-        return df[df['STAT'].isin([0, 2])]
-
-    @staticmethod
-    def filter_on_ground(df: pd.DataFrame) -> pd.DataFrame:
-        """Filter for aircraft on ground (STAT = 1 or 3)"""
-        return df[df['STAT'].isin([1, 3])]
-
-    @staticmethod
-    def filter_by_altitude(df: pd.DataFrame, min_fl: float = None, max_fl: float = None) -> pd.DataFrame:
-        """Filter by flight level range"""
-        result = df.copy()
-        if min_fl is not None:
-            result = result[result['FL'] >= min_fl]
-        if max_fl is not None:
-            result = result[result['FL'] <= max_fl]
-        return result
-
-    @staticmethod
-    def filter_by_callsign(df: pd.DataFrame, pattern: str) -> pd.DataFrame:
-        """Filter by callsign pattern (e.g., 'RYR' for Ryanair)"""
-        return df[df['TI'].str.contains(pattern, na=False, case=False)]
-
-    @staticmethod
-    def filter_by_speed(df: pd.DataFrame, min_speed: float = None, max_speed: float = None) -> pd.DataFrame:
-        """Filter by ground speed"""
-        result = df.copy()
-        if min_speed is not None:
-            result = result[result['GS'] >= min_speed]
-        if max_speed is not None:
-            result = result[result['GS'] <= max_speed]
-        return result
-
-    @staticmethod
-    def get_statistics(df: pd.DataFrame) -> dict:
-        """Get basic statistics for the dataset"""
-        return {
-            'total_records': len(df),
-            'unique_aircraft': df['TA'].nunique(),
-            'airborne_count': len(Cat048AnalysisHelper.filter_airborne(df)),
-            'ground_count': len(Cat048AnalysisHelper.filter_on_ground(df)),
-            'avg_altitude_ft': df['FL'].mean() * 100 if 'FL' in df.columns else None,
-            'avg_ground_speed_kt': df['GS'].mean() if 'GS' in df.columns else None,
-            'altitude_range': (df['FL'].min(), df['FL'].max()) if 'FL' in df.columns else None,
-        }
+        return df[existing_columns + remaining]

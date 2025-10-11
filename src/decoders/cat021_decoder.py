@@ -357,7 +357,7 @@ class Cat021Decoder(AsterixDecoderBase):
             if items_indicator & 0x80 and current_pos + 1 < pos + length:
                 bps_raw = int.from_bytes(data[current_pos:current_pos + 2], byteorder='big')
                 bps_value = (bps_raw & 0x0FFF) * 0.1 + 800  # LSB = 0.1 hPa, offset 800
-                value["BPS"] = bps_value
+                value["BP"] = bps_value
                 current_pos += 2
 
             item = Item(

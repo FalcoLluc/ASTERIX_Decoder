@@ -1,5 +1,3 @@
-
-
 """
 POSSIBLE IMPROVEMENT -> Preguntar profe si és el cas.
 
@@ -16,14 +14,9 @@ class QNHCorrector:
 
     def correct(self, ta_hex: str | None, fl: float | None, bp_mb: float | None):
         """
-        Returns (altitude_ft_corrected_or_raw, corrected_flag 0/1). (0 is no correction applied)
-        Rule:
-          - If altitude >= 6000 ft: no correction and clear stored QNH.
-          - Else:
-              - If bp_mb == standard: do not overwrite stored QNH.
-              - If bp_mb != standard: store and use it.
-              - If stored exists: use it.
-              - Else: no correction possible.
+        Returns (altitude_ft, corrected_flag).
+        - 0: no correction applied
+        - 1: correction applied
         """
         if fl is None:
             return None, 0

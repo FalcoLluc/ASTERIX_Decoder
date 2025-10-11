@@ -1,137 +1,120 @@
 import pandas as pd
-from typing import List
-from src.models.record import Record
-from src.types.enums import CAT021ItemType, CAT048ItemType
+from src.utils.qnh_corrector import QNHCorrector
+
 
 class AsterixPreprocessor:
-    GEOGRAPHIC_BOUNDS = {
-        'lat_min': 40.9,
-        'lat_max': 41.7,
-        'lon_min': 1.5,
-        'lon_max': 2.6
-    }
+    """Centralized preprocessing for ASTERIX data"""
 
-    QNH_STANDARD = 1013.25
-    TRANSITION_ALTITUDE = 6000
+    # Geographic bounds from project specification
+    LAT_MIN = 40.99
+    LAT_MAX = 41.7
+    LON_MIN = 1.5
+    LON_MAX = 2.6
 
     @staticmethod
-    def filter_records_cat021(records: List[Record]) -> List[Record]:
-        """Filtra registros CAT021: área geográfica + eliminar ground"""
-        filtered_records = []
-
-        for record in records:
-            has_valid_position = False
-            is_ground = False
-            lat, lon = None, None
-
-            for item in record.items:
-                if item.item_type == CAT021ItemType.POSITION_WGS84_HIGH_RES:
-                    lat = item.value.get('latitude')
-                    lon = item.value.get('longitude')
-
-                    if (AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lat_min'] <= lat <=
-                            AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lat_max'] and
-                            AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lon_min'] <= lon <=
-                            AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lon_max']):
-                        has_valid_position = True
-
-                if item.item_type == CAT021ItemType.TARGET_REPORT_DESCRIPTOR:
-                    gbs = item.value.get('GBS', 0)
-                    if gbs == 1:
-                        is_ground = True
-
-            if has_valid_position and not is_ground:
-                filtered_records.append(record)
-
-        return filtered_records
-
-    @staticmethod
-    def filter_dataframe_cat021(df: pd.DataFrame) -> pd.DataFrame:
-        """Filtra DataFrame CAT021: área geográfica + eliminar ground"""
-        df = df.copy()
-
-        if 'LAT' in df.columns and 'LON' in df.columns:
-            geo_mask = (
-                    (df['LAT'] >= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lat_min']) &
-                    (df['LAT'] <= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lat_max']) &
-                    (df['LON'] >= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lon_min']) &
-                    (df['LON'] <= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lon_max'])
-            )
-            df = df[geo_mask]
-
-        if 'GBS' in df.columns:
-            df = df[df['GBS'] != 1]
-
-        return df
-
-    @staticmethod
-    def filter_dataframe_cat048(df: pd.DataFrame) -> pd.DataFrame:
-        """Filtra DataFrame CAT048: área geográfica"""
-        df = df.copy()
-
-        if 'LAT' in df.columns and 'LON' in df.columns:
-            geo_mask = (
-                    (df['LAT'] >= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lat_min']) &
-                    (df['LAT'] <= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lat_max']) &
-                    (df['LON'] >= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lon_min']) &
-                    (df['LON'] <= AsterixPreprocessor.GEOGRAPHIC_BOUNDS['lon_max'])
-            )
-            df = df[geo_mask]
-
-        return df
-
-    @staticmethod
-    def apply_qnh_correction(df: pd.DataFrame, qnh: float = QNH_STANDARD) -> pd.DataFrame:
-        """Aplica corrección QNH a aeronaves < 6000 ft"""
-        df = df.copy()
-
-        qnh_correction = (qnh - AsterixPreprocessor.QNH_STANDARD) * 30
-
-        if 'ALT_ft' in df.columns:
-            df['ALT_QNH_ft'] = df['ALT_ft'].copy()
-            below_ta = df['ALT_ft'] < AsterixPreprocessor.TRANSITION_ALTITUDE
-            df.loc[below_ta, 'ALT_QNH_ft'] = df.loc[below_ta, 'ALT_ft'] + qnh_correction
-
-        elif 'FL' in df.columns:
-            df['ALT_ft'] = df['FL'] * 100
-            df['ALT_QNH_ft'] = df['ALT_ft'].copy()
-            below_ta = df['ALT_ft'] < AsterixPreprocessor.TRANSITION_ALTITUDE
-            df.loc[below_ta, 'ALT_QNH_ft'] = df.loc[below_ta, 'ALT_ft'] + qnh_correction
-
-        return df
-
-    @staticmethod
-    def apply_qnh_with_bp(df: pd.DataFrame) -> pd.DataFrame:
+    def process_cat048(df: pd.DataFrame, apply_filters: bool = True,
+                       apply_qnh: bool = True) -> pd.DataFrame:
         """
-        Aplica corrección QNH usando BP de cada aeronave
-        Si BP cambia a 1013 antes de 6000ft, usa BP anterior
+        Apply CAT048 preprocessing pipeline:
+        1. Sort by time
+        2. QNH correction (requires FL, TA, BP)
+        3. Geographic filtering (requires LAT, LON)
         """
         df = df.copy()
 
-        if 'BP' not in df.columns or 'ALT_ft' not in df.columns:
-            return AsterixPreprocessor.apply_qnh_correction(df)
+        # Sort by time (primary) and aircraft (secondary)
+        if 'Time' in df.columns:
+            df = df.sort_values(['Time', 'TA'], na_position='last').reset_index(drop=True)
 
-        df['ALT_QNH_ft'] = df['ALT_ft'].copy()
+        if apply_qnh:
+            df = AsterixPreprocessor._apply_qnh_correction(df)
 
-        for aircraft in df['TA'].unique():
-            mask = df['TA'] == aircraft
-            aircraft_data = df[mask].sort_values('Time')
-
-            previous_bp = None
-
-            for idx in aircraft_data.index:
-                altitude = df.loc[idx, 'ALT_ft']
-                current_bp = df.loc[idx, 'BP']
-
-                if pd.notna(altitude) and altitude < AsterixPreprocessor.TRANSITION_ALTITUDE:
-                    if pd.notna(current_bp):
-                        bp_to_use = current_bp if current_bp != AsterixPreprocessor.QNH_STANDARD else previous_bp
-
-                        if bp_to_use and bp_to_use != AsterixPreprocessor.QNH_STANDARD:
-                            correction = (bp_to_use - AsterixPreprocessor.QNH_STANDARD) * 30
-                            df.loc[idx, 'ALT_QNH_ft'] = altitude + correction
-
-                if pd.notna(current_bp) and current_bp != AsterixPreprocessor.QNH_STANDARD:
-                    previous_bp = current_bp
+        if apply_filters:
+            df = AsterixPreprocessor._filter_geographic(df)
 
         return df
+
+    @staticmethod
+    def process_cat021(df: pd.DataFrame, apply_filters: bool = True,
+                       apply_qnh: bool = False) -> pd.DataFrame:
+        """
+        Apply CAT021 preprocessing pipeline:
+        1. Sort by time
+        2. Optional QNH correction
+        3. Geographic filtering
+        4. Remove ground targets (GBS=1)
+        """
+        df = df.copy()
+
+        # Sort by time
+        if 'Time' in df.columns:
+            df = df.sort_values(['Time', 'TA'], na_position='last').reset_index(drop=True)
+
+        if apply_qnh:
+            df = AsterixPreprocessor._apply_qnh_correction(df)
+
+        if apply_filters:
+            df = AsterixPreprocessor._filter_geographic(df)
+            df = AsterixPreprocessor._filter_ground(df)
+
+        return df
+
+    @staticmethod
+    def _apply_qnh_correction(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply QNH correction (assumes DataFrame already sorted by Time).
+        Updates ALT_QNH_ft and QNH_CORRECTED columns.
+        """
+        if 'FL' not in df.columns or 'TA' not in df.columns:
+            return df
+
+        if 'ALT_QNH_ft' not in df.columns or 'QNH_CORRECTED' not in df.columns:
+            raise ValueError("ALT_QNH_ft and QNH_CORRECTED columns must exist in DataFrame")
+
+        df = df.copy()
+
+        # Group by aircraft and process in time order
+        corrector = QNHCorrector()
+        alt_qnh_list = []
+        qnh_corrected_list = []
+
+        for _, row in df.iterrows():
+            ta = row.get('TA')
+            fl = row.get('FL')
+            bp = row.get('BP')
+
+            alt_qnh, corrected = corrector.correct(ta, fl, bp)
+            alt_qnh_list.append(alt_qnh)
+            qnh_corrected_list.append(corrected)
+
+        df['ALT_QNH_ft'] = alt_qnh_list
+        df['QNH_CORRECTED'] = qnh_corrected_list
+
+        return df
+
+    @staticmethod
+    def _filter_geographic(df: pd.DataFrame) -> pd.DataFrame:
+        """Filter to project geographic bounds (Barcelona area)"""
+        if 'LAT' not in df.columns or 'LON' not in df.columns:
+            return df
+
+        mask = (
+                (df['LAT'] >= AsterixPreprocessor.LAT_MIN) &
+                (df['LAT'] <= AsterixPreprocessor.LAT_MAX) &
+                (df['LON'] >= AsterixPreprocessor.LON_MIN) &
+                (df['LON'] <= AsterixPreprocessor.LON_MAX)
+        )
+        return df[mask].reset_index(drop=True)
+
+    @staticmethod
+    def _filter_ground(df: pd.DataFrame) -> pd.DataFrame:
+        """Remove ground targets (CAT021 only, GBS=1)"""
+        if 'GBS' not in df.columns:
+            return df
+        return df[df['GBS'] != 1].reset_index(drop=True)
+
+    @staticmethod
+    def export_to_csv(df: pd.DataFrame, output_path: str, na_rep: str = 'N/A'):
+        """Export DataFrame to CSV with custom null representation"""
+        df.to_csv(output_path, index=False, na_rep=na_rep)
+        print(f"✅ Exported {len(df):,} records to {output_path}")
