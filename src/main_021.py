@@ -81,7 +81,7 @@ def main():
     df_processed = AsterixPreprocessor.process_cat021(
         df_raw,
         apply_filters=True,   # Geographic + ground filtering
-        apply_qnh=False       # Usually not needed for ADS-B
+        apply_qnh=True       # Usually not needed for ADS-B
     )
 
     filtered_count = initial_count - len(df_processed)
