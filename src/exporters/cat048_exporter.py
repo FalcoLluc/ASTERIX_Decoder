@@ -1,3 +1,5 @@
+# src/exporters/cat048_exporter.py
+
 import pandas as pd
 from typing import List
 from src.models.record import Record
@@ -16,12 +18,43 @@ class Cat048Exporter:
         rows = []
 
         for record in records:
-            # Start with base record info
+            # Initialize row with your exact column names
             row = {
                 'CAT': record.category.value,
                 'SAC': None,
                 'SIC': None,
+                'Time': None,
+                'Latitud': None,
+                'Longitud': None,
+                'h_wgs84': None,
+                'h_ft': None,
+                'RHO': None,
+                'THETA': None,
+                'Mode_3A': None,
+                'Flight_Level': None,
+                'ModeC_corrected': None,
+                'Target_address': None,
+                'Target_identification': None,
+                'Mode_S': None,
+                'BP': None,
+                'RA': None,
+                'TTA': None,
+                'GS': None,
+                'TAR': None,
+                'TAS': None,
+                'HDG': None,
+                'IAS': None,
+                'MACH': None,
+                'BAR': None,
+                'IVV': None,
+                'Track_number': None,
+                'Ground_Speed_kt': None,
+                'Heading': None,
+                'STAT230': None
             }
+
+            # Track which BDS registers are present
+            bds_present = []
 
             # Extract all items and flatten into single row
             for item in record.items:
@@ -35,62 +68,43 @@ class Cat048Exporter:
                 elif item_type == CAT048ItemType.TIME_OF_DAY:
                     row['Time'] = value.get('total_seconds')
 
-                elif item_type == CAT048ItemType.TARGET_REPORT_DESCRIPTOR:
-                    row['TYP'] = value.get('TYP')
-                    row['SIM'] = value.get('SIM')
-                    row['SPI'] = value.get('SPI')
-
                 elif item_type == CAT048ItemType.MEASURED_POSITION_POLAR:
                     row['RHO'] = value.get('RHO_nm')
                     row['THETA'] = value.get('THETA_degrees')
 
                 elif item_type == CAT048ItemType.MODE_3A_CODE:
-                    row['Mode3/A'] = value.get('Mode3/A')
-                    row['V'] = value.get('V')
-                    row['G'] = value.get('G')
-                    row['L'] = value.get('L')
+                    row['Mode_3A'] = value.get('Mode3/A')
 
                 elif item_type == CAT048ItemType.FLIGHT_LEVEL:
-                    row['FL'] = value.get('FL')
-                    row['FL_V'] = value.get('V')
-                    row['FL_G'] = value.get('G')
-
-                elif item_type == CAT048ItemType.RADAR_PLOT_CHARACTERISTICS:
-                    row['SRL'] = value.get('SRL')
-                    row['SRR'] = value.get('SRR')
-                    row['SAM'] = value.get('SAM')
+                    row['Flight_Level'] = value.get('FL')
 
                 elif item_type == CAT048ItemType.AIRCRAFT_ADDRESS:
-                    row['TA'] = value.get('aircraft_address_hex')
+                    row['Target_address'] = value.get('aircraft_address_hex')
 
                 elif item_type == CAT048ItemType.AIRCRAFT_IDENTIFICATION:
-                    row['TI'] = value.get('TI')
+                    row['Target_identification'] = value.get('TI')
 
                 elif item_type == CAT048ItemType.TRACK_NUMBER:
-                    row['TN'] = value.get('TN')
+                    row['Track_number'] = value.get('TN')
 
                 elif item_type == CAT048ItemType.TRACK_VELOCITY_POLAR:
-                    row['CALC_GS'] = value.get('GS_kt')
-                    row['CALC_HDG'] = value.get('HDG_degrees')
-
-                elif item_type == CAT048ItemType.TRACK_STATUS:
-                    row['CNF'] = value.get('CNF')
-                    row['RAD'] = value.get('RAD')
-                    row['CDM'] = value.get('CDM')
+                    row['Ground_Speed_kt'] = value.get('GS_kt')
+                    row['Heading'] = value.get('HDG_degrees')
 
                 elif item_type == CAT048ItemType.COMMUNICATIONS_ACAS:
-                    row['COM'] = value.get('COM')
-                    row['STAT'] = value.get('STAT')
-                    row['STAT_DESC'] = value.get('STAT_description')
+                    row['STAT230'] = value.get('STAT_description')
 
                 elif item_type == CAT048ItemType.MODE_S_MB_DATA:
                     bds_registers = value.get('bds_registers', [])
                     for bds_reg in bds_registers:
-                        # BDS 4.0 fields
-                        if 'MCP_FCU_ALT_ft' in bds_reg:
-                            row['MCP_FCU_ALT'] = bds_reg['MCP_FCU_ALT_ft']
-                        if 'FMS_ALT_ft' in bds_reg:
-                            row['FMS_ALT'] = bds_reg['FMS_ALT_ft']
+                        # Track BDS code
+                        bds_code = bds_reg.get('bds_code')
+                        if bds_code:
+                            bds_formatted = f"BDS {bds_code[0]}.{bds_code[1]}"
+                            if bds_formatted not in bds_present:
+                                bds_present.append(bds_formatted)
+
+                        # BDS 4.0 - BP
                         if 'BP_mb' in bds_reg:
                             row['BP'] = bds_reg['BP_mb']
 
@@ -118,67 +132,11 @@ class Cat048Exporter:
                         if 'IVV_ft_min' in bds_reg:
                             row['IVV'] = bds_reg['IVV_ft_min']
 
+            # Set Mode_S field with all BDS registers present
+            if bds_present:
+                row['Mode_S'] = ' '.join(bds_present)
+
             rows.append(row)
 
-        # Create DataFrame
-        df = pd.DataFrame(rows)
-
-        # Define column order (includes QNH columns for preprocessor)
-        column_order = [
-            # Basic identifiers
-            'CAT', 'SAC', 'SIC', 'Time',
-
-            # Position (LAT/LON added by WGS84 conversion)
-            'LAT', 'LON',
-
-            # Target descriptor
-            'TYP', 'SIM', 'SPI',
-
-            # Polar coordinates
-            'RHO', 'THETA',
-
-            # Mode 3/A
-            'Mode3/A', 'V', 'G', 'L',
-
-            # Flight level & altitude
-            'FL', 'FL_V', 'FL_G',
-            'ALT_QNH_ft',  # Pre-create for preprocessor
-            'QNH_CORRECTED',  # Pre-create for preprocessor
-
-            # Radar characteristics
-            'SRL', 'SRR', 'SAM',
-
-            # Aircraft identification
-            'TA', 'TI', 'TN',
-
-            # BDS 4.0
-            'BP', 'MCP_FCU_ALT', 'FMS_ALT',
-
-            # BDS 5.0
-            'RA', 'TTA', 'GS', 'TAR', 'TAS',
-
-            # BDS 6.0
-            'HDG', 'IAS', 'MACH', 'BAR', 'IVV',
-
-            # Calculated velocity
-            'CALC_GS', 'CALC_HDG',
-
-            # Track status
-            'CNF', 'RAD', 'CDM',
-
-            # Communications/ACAS
-            'COM', 'STAT', 'STAT_DESC'
-        ]
-
-        # Add missing QNH columns if not present (will be filled by preprocessor)
-        for col in ['ALT_QNH_ft', 'QNH_CORRECTED', 'LAT', 'LON']:
-            if col not in df.columns:
-                df[col] = None
-
-        # Reorder columns (only include existing columns)
-        existing_columns = [col for col in column_order if col in df.columns]
-
-        # Add any remaining columns not in the predefined order
-        remaining = [col for col in df.columns if col not in existing_columns]
-
-        return df[existing_columns + remaining]
+        # Create DataFrame - columns already in correct order from dict
+        return pd.DataFrame(rows)

@@ -137,10 +137,14 @@ class Cat048Decoder(AsterixDecoderBase):
         # Convert to seconds (divide by 128 since each unit = 1/128 second)
         total_seconds = time_128_seconds / 128.0
 
-        # Calculate hours, minutes, seconds
+        # Calculate hours, minutes, seconds, milliseconds
         hours = int(total_seconds // 3600)
         minutes = int((total_seconds % 3600) // 60)
-        seconds = total_seconds % 60
+        seconds = int(total_seconds % 60)
+        milliseconds = int((total_seconds - int(total_seconds)) * 1000)
+
+        # Create formatted string: HH:MM:SS.mmm
+        formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
         item = Item(
             item_offset=pos,
@@ -151,7 +155,9 @@ class Cat048Decoder(AsterixDecoderBase):
                 "total_seconds": total_seconds,
                 "hours": hours,
                 "minutes": minutes,
-                "seconds": seconds
+                "seconds": seconds,
+                "milliseconds": milliseconds,
+                "formatted": formatted_time,
             }
         )
         record.items.append(item)

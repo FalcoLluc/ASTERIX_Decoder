@@ -233,8 +233,10 @@ class Cat021Decoder(AsterixDecoderBase):
 
         hours = int(total_seconds // 3600)
         minutes = int((total_seconds % 3600) // 60)
-        seconds = total_seconds % 60
-        time_str = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+        seconds = int(total_seconds % 60)
+        milliseconds = int((total_seconds - int(total_seconds)) * 1000)
+
+        formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
         item = Item(
             item_offset=pos,
@@ -243,7 +245,11 @@ class Cat021Decoder(AsterixDecoderBase):
             item_type=CAT021ItemType.TIME_MESSAGE_RECEPTION_POSITION,
             value={
                 "total_seconds": total_seconds,
-                "time_string": time_str
+                "hours": hours,
+                "minutes": minutes,
+                "seconds": seconds,
+                "milliseconds": milliseconds,
+                "formatted": formatted_time,
             }
         )
         record.items.append(item)

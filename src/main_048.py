@@ -14,7 +14,7 @@ def main():
     # ============================================================
     # LOGGING CONFIGURATION
     # ============================================================
-    LOG_LEVEL = logging.WARNING  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_LEVEL = logging.WARNING
 
     logging.basicConfig(
         level=LOG_LEVEL,
@@ -78,12 +78,12 @@ def main():
 
     df_processed = AsterixPreprocessor.process_cat048(
         df_raw,
-        apply_filters=False,  # Geographic filtering
+        apply_filters=False,  # Geographic filtering (requires WGS84 conversion)
         apply_qnh=True  # QNH correction
     )
 
     filtered_count = initial_count - len(df_processed)
-    qnh_corrected = df_processed['QNH_CORRECTED'].sum() if 'QNH_CORRECTED' in df_processed.columns else 0
+    qnh_corrected = df_processed['ModeC_corrected'].sum() if 'ModeC_corrected' in df_processed.columns else 0  # ✅ Fixed
 
     print(f"   ✅ QNH correction applied: {qnh_corrected:,} records corrected")
     print(f"   ✅ Geographic filtering: {filtered_count:,} records removed")
@@ -96,7 +96,14 @@ def main():
         print("\n📊 Data Preview (first 5 rows):")
         pd.set_option('display.max_columns', 15)
         pd.set_option('display.width', 120)
-        print(df_processed[['Time', 'TA', 'TI', 'FL', 'ALT_QNH_ft', 'QNH_CORRECTED', 'GS', 'HDG']].head(5))
+
+        # Updated column names
+        preview_cols = ['Time', 'Target_address', 'Target_identification', 'Flight_Level',
+                        'h_ft', 'ModeC_corrected', 'GS', 'HDG']  # ✅ Fixed
+        available_cols = [c for c in preview_cols if c in df_processed.columns]
+
+        if available_cols:
+            print(df_processed[available_cols].head(5))
 
     # ============================================================
     # STEP 5: STATISTICS

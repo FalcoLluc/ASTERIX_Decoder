@@ -5,18 +5,43 @@ from src.types.enums import CAT021ItemType
 
 
 class Cat021Exporter:
+    """Export CAT021 decoded records to pandas DataFrame with one row per record"""
 
     @staticmethod
     def records_to_dataframe(records: List[Record]) -> pd.DataFrame:
+        """
+        Convert list of Record objects to a pandas DataFrame.
+        Each row represents ONE record with all fields flattened.
+        """
         rows = []
 
         for record in records:
+            # Initialize row with consistent column names
             row = {
                 'CAT': record.category.value,
                 'SAC': None,
                 'SIC': None,
+                'Time': None,
+                'Latitud': None,
+                'Longitud': None,
+                'ATP': None,
+                'ARC': None,
+                'RC': None,
+                'RAB': None,
+                'DCR': None,
+                'GBS': None,
+                'SIM': None,
+                'TST': None,
+                'Target_address': None,
+                'Mode_3A': None,
+                'Flight_Level': None,
+                'h_ft': None,              # ADS-B geometric altitude
+                'ModeC_corrected': None,   # QNH correction flag (if applied)
+                'Target_identification': None,
+                'BP': None
             }
 
+            # Extract all items and flatten into single row
             for item in record.items:
                 item_type = item.item_type
                 value = item.value
@@ -36,55 +61,29 @@ class Cat021Exporter:
                     row['TST'] = value.get('TST')
 
                 elif item_type == CAT021ItemType.POSITION_WGS84_HIGH_RES:
-                    row['LAT'] = value.get('latitude')
-                    row['LON'] = value.get('longitude')
+                    row['Latitud'] = value.get('latitude')
+                    row['Longitud'] = value.get('longitude')
 
                 elif item_type == CAT021ItemType.TARGET_ADDRESS:
-                    row['TA'] = value.get('target_address_hex')
+                    row['Target_address'] = value.get('target_address_hex')
 
                 elif item_type == CAT021ItemType.TIME_MESSAGE_RECEPTION_POSITION:
                     row['Time'] = value.get('total_seconds')
 
                 elif item_type == CAT021ItemType.MODE_3A_CODE:
-                    row['Mode3/A'] = value.get('mode_3a_code')
+                    row['Mode_3A'] = value.get('mode_3a_code')
 
                 elif item_type == CAT021ItemType.FLIGHT_LEVEL:
-                    row['FL'] = value.get('flight_level')
-                    row['ALT_ft'] = value.get('altitude_feet')
+                    row['Flight_Level'] = value.get('flight_level')
+                    row['h_ft'] = value.get('altitude_feet')  # Geometric altitude from ADS-B
 
                 elif item_type == CAT021ItemType.TARGET_IDENTIFICATION:
-                    row['TI'] = value.get('callsign')
+                    row['Target_identification'] = value.get('callsign')
 
                 elif item_type == CAT021ItemType.RESERVED_EXPANSION_FIELD:
-                    row['BP'] = value.get('BP')
+                    row['BP'] = value.get('BP')  # Barometric pressure setting
 
             rows.append(row)
 
-        df = pd.DataFrame(rows)
-
-        # Define column order
-        column_order = [
-            'CAT', 'SAC', 'SIC', 'Time',
-            'ATP', 'ARC', 'RC', 'RAB', 'DCR', 'GBS', 'SIM', 'TST',
-            'LAT', 'LON',
-            'TA',
-            'Mode3/A',
-            'FL', 'ALT_ft',
-            'ALT_QNH_ft',  # ✅ Pre-create for preprocessor
-            'QNH_CORRECTED',  # ✅ Pre-create for preprocessor
-            'TI',
-            'BP'
-        ]
-
-        # Add missing QNH columns if not present (will be filled by preprocessor)
-        for col in ['ALT_QNH_ft', 'QNH_CORRECTED']:
-            if col not in df.columns:
-                df[col] = None
-
-        # Reorder columns (only include existing columns)
-        existing_columns = [col for col in column_order if col in df.columns]
-
-        # Add any remaining columns not in order
-        remaining = [col for col in df.columns if col not in existing_columns]
-
-        return df[existing_columns + remaining]
+        # Create DataFrame - columns already in correct order from dict
+        return pd.DataFrame(rows)

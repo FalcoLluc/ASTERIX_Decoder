@@ -1,5 +1,3 @@
-# main_cat021.py
-
 import time
 import logging
 import pandas as pd
@@ -80,8 +78,8 @@ def main():
 
     df_processed = AsterixPreprocessor.process_cat021(
         df_raw,
-        apply_filters=True,   # Geographic + ground filtering
-        apply_qnh=True       # Usually not needed for ADS-B
+        apply_filters=True,  # Geographic + ground filtering
+        apply_qnh=False  # Usually not needed for ADS-B
     )
 
     filtered_count = initial_count - len(df_processed)
@@ -98,9 +96,14 @@ def main():
         print("\n📊 Data Preview (first 5 rows):")
         pd.set_option('display.max_columns', 12)
         pd.set_option('display.width', 120)
-        preview_cols = ['Time', 'TA', 'TI', 'FL', 'ALT_ft', 'LAT', 'LON', 'GBS']
+
+        # Updated column names
+        preview_cols = ['Time', 'Target_address', 'Target_identification',
+                        'Flight_Level', 'h_ft', 'Latitud', 'Longitud', 'GBS']  # ✅ Fixed
         available_cols = [c for c in preview_cols if c in df_processed.columns]
-        print(df_processed[available_cols].head(5))
+
+        if available_cols:
+            print(df_processed[available_cols].head(5))
 
     # ============================================================
     # STEP 5: STATISTICS
@@ -140,8 +143,9 @@ def main():
         print(f"\n  Top 5 aircraft by records:")
         top_aircraft = Cat021AnalysisHelper.get_top_aircraft_by_records(df_processed, n=5)
         for idx, row in top_aircraft.iterrows():
-            callsign = row['TI'] if pd.notna(row['TI']) else 'N/A'
-            print(f"    {row['TA']:6s} ({callsign:8s}): {row['record_count']:5d} records")
+            # Updated column names
+            callsign = row['Target_identification'] if pd.notna(row['Target_identification']) else 'N/A'  # ✅ Fixed
+            print(f"    {row['Target_address']:6s} ({callsign:8s}): {row['record_count']:5d} records")  # ✅ Fixed
 
     # ============================================================
     # STEP 7: EXPORT TO CSV
