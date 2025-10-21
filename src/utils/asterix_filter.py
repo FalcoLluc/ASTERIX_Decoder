@@ -35,18 +35,15 @@ class AsterixFilter:
     def filter_airborne(df: pd.DataFrame) -> pd.DataFrame:
         """
         Filter for airborne aircraft.
-        CAT021: GBS=0 (airborne)
-        CAT048: STAT in [0, 2] (airborne)
         """
-        # Try CAT021 GBS field
-        if 'GBS' in df.columns:
-            return df[df['GBS'] == 0].reset_index(drop=True)
+        if 'STAT_code' in df.columns:
+            mask = df['STAT_code'].isin([0, 2])
+            result = df[mask].reset_index(drop=True)
+            return result
 
-        # Try CAT048 STAT field
-        if 'STAT' in df.columns:
-            # Filter numeric values or descriptions
-            airborne_mask = df['STAT'].isin([0, 2, 'Airborne', 'On Ground - No emergency, No SPI'])
-            return df[airborne_mask].reset_index(drop=True)
+        if 'GBS' in df.columns:
+            mask = (df['GBS'].notna()) & (df['GBS'] == 0)
+            return df[mask].reset_index(drop=True)
 
         return df
 

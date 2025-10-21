@@ -43,6 +43,7 @@ class AsterixExporter:
         'TN',
         'GS(kt)',
         'STAT',
+        'STAT_code',
 
         # Detection/Quality fields
         'TYP',  # CAT048: Detection type (PSR/SSR/Mode S)
@@ -223,6 +224,7 @@ class AsterixExporter:
 
             elif item_type == CAT048ItemType.COMMUNICATIONS_ACAS:
                 row['STAT'] = value.get('STAT_description')
+                row['STAT_code'] = value.get('STAT')
 
             elif item_type == CAT048ItemType.TARGET_REPORT_DESCRIPTOR:
                 # Extract all fields from Target Report Descriptor
