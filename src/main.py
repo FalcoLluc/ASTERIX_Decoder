@@ -66,6 +66,8 @@ def main():
 
     print(f"   ✅ Decoded {len(records):,} records in {elapsed_time:.4f}s")
     print(f"   ⚡ Throughput: {len(records) / elapsed_time:.2f} records/sec")
+    print(records[0].items)
+    print(records[1].items)
     if records:
         avg_items = sum(len(r.items) for r in records) / len(records)
         print(f"   📊 Average items per record: {avg_items:.1f}")

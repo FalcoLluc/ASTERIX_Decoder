@@ -33,19 +33,17 @@ class AsterixFilter:
 
     @staticmethod
     def filter_airborne(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Filter for airborne aircraft.
-        """
+        """Filter for airborne aircraft using any available indicator."""
+        if 'STAT_code' not in df.columns and 'GBS' not in df.columns:
+            return df
+
+        mask = pd.Series(False, index=df.index)
         if 'STAT_code' in df.columns:
-            mask = df['STAT_code'].isin([0, 2])
-            result = df[mask].reset_index(drop=True)
-            return result
-
+            mask = mask | df['STAT_code'].isin([0, 2])
         if 'GBS' in df.columns:
-            mask = (df['GBS'].notna()) & (df['GBS'] == 0)
-            return df[mask].reset_index(drop=True)
+            mask = mask | (df['GBS'] == 0)
 
-        return df
+        return df[mask].reset_index(drop=True)
 
     @staticmethod
     def filter_on_ground(df: pd.DataFrame) -> pd.DataFrame:

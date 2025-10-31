@@ -4,7 +4,6 @@ from src.models.record import Record
 from src.models.item import Item
 from typing import List
 
-############ FALTA FILTRAR I QNH
 
 class Cat021Decoder(AsterixDecoderBase):
     def __init__(self):
@@ -21,7 +20,7 @@ class Cat021Decoder(AsterixDecoderBase):
             CAT021ItemType.TARGET_IDENTIFICATION: self._decode_target_identification,  # FRN 29
             CAT021ItemType.RESERVED_EXPANSION_FIELD: self._decode_reserved_expansion_field,  # FRN 48 (RE-BPS)
 
-            # Items to skip
+            # Items to skip - Fixed length
             CAT021ItemType.TRACK_NUMBER: self._skip_fixed_2,
             CAT021ItemType.SERVICE_IDENTIFICATION: self._skip_fixed_1,
             CAT021ItemType.TIME_APPLICABILITY_POSITION: self._skip_fixed_3,
@@ -33,7 +32,6 @@ class Cat021Decoder(AsterixDecoderBase):
             CAT021ItemType.TIME_MESSAGE_RECEPTION_VELOCITY: self._skip_fixed_3,
             CAT021ItemType.TIME_MESSAGE_RECEPTION_VELOCITY_HIGH_PRECISION: self._skip_fixed_4,
             CAT021ItemType.GEOMETRIC_HEIGHT: self._skip_fixed_2,
-            CAT021ItemType.QUALITY_INDICATORS: self._skip_variable,
             CAT021ItemType.MOPS_VERSION: self._skip_fixed_1,
             CAT021ItemType.ROLL_ANGLE: self._skip_fixed_2,
             CAT021ItemType.MAGNETIC_HEADING: self._skip_fixed_2,
@@ -44,18 +42,25 @@ class Cat021Decoder(AsterixDecoderBase):
             CAT021ItemType.TRACK_ANGLE_RATE: self._skip_fixed_2,
             CAT021ItemType.TIME_ASTERIX_REPORT_TRANSMISSION: self._skip_fixed_3,
             CAT021ItemType.EMITTER_CATEGORY: self._skip_fixed_1,
-            CAT021ItemType.MET_INFORMATION: self._skip_compound,
             CAT021ItemType.SELECTED_ALTITUDE: self._skip_fixed_2,
             CAT021ItemType.FINAL_STATE_SELECTED_ALTITUDE: self._skip_fixed_2,
-            CAT021ItemType.TRAJECTORY_INTENT: self._skip_compound,
             CAT021ItemType.SERVICE_MANAGEMENT: self._skip_fixed_1,
             CAT021ItemType.AIRCRAFT_OPERATIONAL_STATUS: self._skip_fixed_1,
-            CAT021ItemType.SURFACE_CAPABILITIES: self._skip_variable,
             CAT021ItemType.MESSAGE_AMPLITUDE: self._skip_fixed_1,
-            CAT021ItemType.MODE_S_MB_DATA: self._skip_repetitive,
             CAT021ItemType.ACAS_RESOLUTION_ADVISORY: self._skip_fixed_7,
             CAT021ItemType.RECEIVER_ID: self._skip_fixed_1,
-            CAT021ItemType.DATA_AGES: self._skip_compound,
+
+            # Items to skip - Variable length
+            CAT021ItemType.QUALITY_INDICATORS: self._skip_variable,
+            CAT021ItemType.SURFACE_CAPABILITIES: self._skip_variable,
+
+            # Items to skip - Compound
+            CAT021ItemType.MET_INFORMATION: self._skip_compound_met,
+            CAT021ItemType.TRAJECTORY_INTENT: self._skip_compound_trajectory,
+            CAT021ItemType.DATA_AGES: self._skip_compound_data_ages,
+
+            # Items to skip - Repetitive
+            CAT021ItemType.MODE_S_MB_DATA: self._skip_repetitive,
         }
 
     def decode_record(self, record: Record) -> Record:
@@ -351,21 +356,15 @@ class Cat021Decoder(AsterixDecoderBase):
         if pos >= len(data):
             return pos
 
+        # First octet: length indicator (total length including itself)
         length = data[pos]
         if pos + length > len(data):
             return pos
 
-        if pos + 1 < len(data):
-            items_indicator = data[pos + 1]
-            current_pos = pos + 2
-            value = {}
+        value = {}
 
-            if items_indicator & 0x80 and current_pos + 1 < pos + length:
-                bps_raw = int.from_bytes(data[current_pos:current_pos + 2], byteorder='big')
-                bps_value = (bps_raw & 0x0FFF) * 0.1 + 800  # LSB = 0.1 hPa, offset 800
-                value["BP"] = bps_value
-                current_pos += 2
-
+        # Check if we have items indicator
+        if pos + 1 >= len(data):
             item = Item(
                 item_offset=pos,
                 length=length,
@@ -374,6 +373,63 @@ class Cat021Decoder(AsterixDecoderBase):
                 value=value
             )
             record.items.append(item)
+            return pos + length
+
+        # Second octet: items indicator
+        items_indicator = data[pos + 1]
+        current_pos = pos + 2  # Start after length and items indicator
+
+        # BPS - Barometric Pressure Setting (bit 8 = 0x80) - 2 octets
+        if items_indicator & 0x80:
+            if current_pos + 2 <= pos + length:
+                bps_raw = int.from_bytes(data[current_pos:current_pos + 2], byteorder='big')
+                bps_value = (bps_raw & 0x0FFF) * 0.1 + 800  # LSB = 0.1 hPa, offset 800
+                value["BP"] = bps_value
+                current_pos += 2
+
+        # SelH - Selected Heading (bit 7 = 0x40) - 2 octets
+        if items_indicator & 0x40:
+            if current_pos + 2 <= pos + length:
+                current_pos += 2
+
+        # NAV - Navigation Mode (bit 6 = 0x20) - 1 octet
+        if items_indicator & 0x20:
+            if current_pos + 1 <= pos + length:
+                current_pos += 1
+
+        # GAO - GPS Antenna Offset (bit 5 = 0x10) - 1 octet
+        if items_indicator & 0x10:
+            if current_pos + 1 <= pos + length:
+                current_pos += 1
+
+        # SGV - Surface Ground Vector (bit 4 = 0x08) - variable length with FX
+        if items_indicator & 0x08:
+            sgv_length = self._read_variable_length_item(current_pos, data)
+            if current_pos + sgv_length <= pos + length:
+                current_pos += sgv_length
+
+        # STA - Aircraft Status (bit 3 = 0x04) - variable length with FX
+        if items_indicator & 0x04:
+            sta_length = self._read_variable_length_item(current_pos, data)
+            if current_pos + sta_length <= pos + length:
+                current_pos += sta_length
+
+        # TNH - True North Heading (bit 2 = 0x02) - 2 octets
+        if items_indicator & 0x02:
+            if current_pos + 2 <= pos + length:
+                current_pos += 2
+
+        # MES - Military Extended Squitter (bit 1 = 0x01) - compound
+        # Skip if present (would require additional parsing)
+
+        item = Item(
+            item_offset=pos,
+            length=length,
+            frn=48,
+            item_type=CAT021ItemType.RESERVED_EXPANSION_FIELD,
+            value=value
+        )
+        record.items.append(item)
 
         return pos + length
 
@@ -411,14 +467,86 @@ class Cat021Decoder(AsterixDecoderBase):
         length = self._read_variable_length_item(pos, data)
         return pos + length
 
-    def _skip_compound(self, pos: int, record: Record) -> int:
-        """Skip compound item"""
+    def _skip_compound_met(self, pos: int, record: Record) -> int:
+        """Skip I021/220 Met Information (compound with presence indicators)"""
         data = record.raw_data
         if pos >= len(data):
             return pos
 
-        length = data[pos]
-        return pos + length if pos + length <= len(data) else pos
+        primary = data[pos]
+        current_pos = pos + 1
+
+        # WS - Wind Speed (bit 8 = 0x80) - 2 octets
+        if primary & 0x80:
+            current_pos += 2
+
+        # WD - Wind Direction (bit 7 = 0x40) - 2 octets
+        if primary & 0x40:
+            current_pos += 2
+
+        # TMP - Temperature (bit 6 = 0x20) - 2 octets
+        if primary & 0x20:
+            current_pos += 2
+
+        # TRB - Turbulence (bit 5 = 0x10) - 1 octet
+        if primary & 0x10:
+            current_pos += 1
+
+        return current_pos
+
+    def _skip_compound_trajectory(self, pos: int, record: Record) -> int:
+        """Skip I021/110 Trajectory Intent (compound)"""
+        data = record.raw_data
+        if pos >= len(data):
+            return pos
+
+        primary = data[pos]
+        current_pos = pos + 1
+
+        # TIS - Trajectory Intent Status (bit 8 = 0x80) - variable with FX
+        if primary & 0x80:
+            length = self._read_variable_length_item(current_pos, data)
+            current_pos += length
+
+        # TID - Trajectory Intent Data (bit 7 = 0x40) - repetitive
+        if primary & 0x40:
+            if current_pos >= len(data):
+                return current_pos
+            rep = data[current_pos]
+            current_pos += 1 + (rep * 15)  # Each trajectory point is 15 octets
+
+        return current_pos
+
+    def _skip_compound_data_ages(self, pos: int, record: Record) -> int:
+        """Skip I021/295 Data Ages (compound with variable primary subfield)"""
+        data = record.raw_data
+        if pos >= len(data):
+            return pos
+
+        current_pos = pos
+
+        # Read primary subfield (variable length with FX bit)
+        primary_bytes = []
+        while True:
+            if current_pos >= len(data):
+                return current_pos
+            byte = data[current_pos]
+            primary_bytes.append(byte)
+            current_pos += 1
+            if not (byte & 0x01):  # FX bit not set - end of primary subfield
+                break
+
+        # Count subfields present (each bit except FX represents a subfield)
+        subfield_count = 0
+        for byte in primary_bytes:
+            for bit in range(7, 0, -1):  # bits 8-2 (skip bit 1 which is FX)
+                if byte & (1 << bit):
+                    subfield_count += 1
+
+        # Each subfield is 1 octet
+        current_pos += subfield_count
+
+        return current_pos
 
     def _skip_repetitive(self, pos: int, record: Record) -> int:
         """Skip repetitive item (REP + data)"""
@@ -427,7 +555,7 @@ class Cat021Decoder(AsterixDecoderBase):
             return pos
 
         rep = data[pos]
-        item_size = 8
+        item_size = 8  # Each Mode S MB Data item is 8 octets
         total_length = 1 + (rep * item_size)
 
         return pos + total_length if pos + total_length <= len(data) else pos
@@ -440,6 +568,6 @@ class Cat021Decoder(AsterixDecoderBase):
         while pos + length < len(data):
             byte = data[pos + length]
             length += 1
-            if not (byte & 0x01):
+            if not (byte & 0x01):  # FX bit not set - end of item
                 break
         return length
