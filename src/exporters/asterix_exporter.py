@@ -201,6 +201,9 @@ class AsterixExporter:
             elif item_type == CAT048ItemType.MEASURED_POSITION_POLAR:
                 row['RHO'] = value.get('RHO_nm')
                 row['THETA'] = value.get('THETA_degrees')
+                row['LAT'] = value.get('latitude')
+                row['LON'] = value.get('longitude')
+
 
             elif item_type == CAT048ItemType.MODE_3A_CODE:
                 row['Mode3/A'] = value.get('Mode3/A')

@@ -3,6 +3,8 @@ from src.types.enums import CAT048ItemType
 from src.models.record import Record
 from src.models.item import Item
 from typing import List
+from src.utils.coordinate_transformer import CoordinateTransformer, BARCELONA_RADAR_CONFIG
+
 
 """
 Dentro del DI I048/250 “Mode S MB Data” solo hará falta decodificar los subcampos de los
@@ -12,6 +14,12 @@ BDS 4.0, 5.0, 6.0
 class Cat048Decoder(AsterixDecoderBase):
     def __init__(self):
         super().__init__()
+        # Initialize coordinate transformer for Barcelona radar
+        self.coordinate_transformer = CoordinateTransformer(
+            radar_lat_deg=BARCELONA_RADAR_CONFIG['lat_deg'],
+            radar_lon_deg=BARCELONA_RADAR_CONFIG['lon_deg'],
+            radar_height_m=BARCELONA_RADAR_CONFIG['height_m']
+        )
         # Map FSPEC bits (item types) to decoding methods
         self.decoder_map = {
             CAT048ItemType.DATA_SOURCE_IDENTIFIER: self._decode_data_source,
@@ -244,15 +252,37 @@ class Cat048Decoder(AsterixDecoderBase):
         # Normalize angle to 0-360 degrees
         theta_degrees %= 360.0
 
+        # Transform polar coordinates to WGS-84
+        try:
+            lat_deg, lon_deg, height_m = self.coordinate_transformer.polar_to_wgs84(
+                rho_nm=range_nm,
+                theta_deg=theta_degrees,
+                elevation_deg=0.0
+            )
+
+            value = {
+                "RHO_nm": range_nm,
+                "THETA_degrees": theta_degrees,
+                "latitude": lat_deg,
+                "longitude": lon_deg,
+                "height_m": height_m
+            }
+        except Exception as e:
+            self.logger.warning(f"Failed to transform coordinates: {e}")
+            value = {
+                "RHO_nm": range_nm,
+                "THETA_degrees": theta_degrees,
+                "latitude": None,
+                "longitude": None,
+                "height_m": None
+            }
+
         item = Item(
             item_offset=pos,
             length=4,
             frn=4,
             item_type=CAT048ItemType.MEASURED_POSITION_POLAR,
-            value={
-                "RHO_nm": range_nm,
-                "THETA_degrees": theta_degrees,
-            }
+            value=value
         )
 
         record.items.append(item)
