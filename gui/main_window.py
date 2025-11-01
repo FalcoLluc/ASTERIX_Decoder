@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTableView, QLabel, QLineEdit, QSpinBox,
-    QCheckBox, QMessageBox, QProgressDialog, QGroupBox, QHeaderView
+    QCheckBox, QMessageBox, QProgressDialog, QGroupBox, QHeaderView,
+    QTabWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction
@@ -9,6 +10,7 @@ import pandas as pd
 import sys
 
 from gui.pandas_model import PandasModel
+from gui.map_widget import MapWidget
 from src.decoders.asterix_file_reader import AsterixFileReader
 from src.exporters.asterix_exporter import AsterixExporter
 from src.utils.asterix_filter import AsterixFilter
@@ -90,12 +92,26 @@ class AsterixGUI(QMainWindow):
         self.status_label = QLabel("Ready — Load an ASTERIX file to begin.")
         layout.addWidget(self.status_label)
 
-        # Table view
+        # Tabs for Table and Map views
+        self.tabs = QTabWidget()
+
+        # Tab 1: Table view
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+
         self.table = QTableView()
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
+        table_layout.addWidget(self.table)
+
+        self.tabs.addTab(table_widget, "📋 Table View")
+
+        # Tab 2: Map view
+        self.map_widget = MapWidget()
+        self.tabs.addTab(self.map_widget, "🗺 Map View")
+
+        layout.addWidget(self.tabs)
 
         # Filter panel (dynamic filters after loading)
         filter_panel = self.create_filter_panel()
@@ -168,7 +184,6 @@ class AsterixGUI(QMainWindow):
         self.callsign_input = QLineEdit()
         self.callsign_input.setPlaceholderText("e.g., RYR, IBE")
         self.callsign_input.setMaximumWidth(150)
-        # ✅ Use returnPressed instead of textChanged
         self.callsign_input.returnPressed.connect(self.apply_dynamic_filters)
         layout.addWidget(self.callsign_input)
 
@@ -178,7 +193,6 @@ class AsterixGUI(QMainWindow):
         self.min_fl_spin.setRange(0, 600)
         self.min_fl_spin.setValue(0)
         self.min_fl_spin.setMaximumWidth(80)
-        # ✅ Don't connect to valueChanged - only trigger on Apply button
         layout.addWidget(self.min_fl_spin)
 
         layout.addWidget(QLabel("Max FL:"))
@@ -186,27 +200,23 @@ class AsterixGUI(QMainWindow):
         self.max_fl_spin.setRange(0, 600)
         self.max_fl_spin.setValue(600)
         self.max_fl_spin.setMaximumWidth(80)
-        # ✅ Don't connect to valueChanged
         layout.addWidget(self.max_fl_spin)
 
         # Airborne only
         self.airborne_check = QCheckBox("Airborne Only")
-        # ✅ Don't connect to stateChanged
         layout.addWidget(self.airborne_check)
 
         # Category filter
         layout.addWidget(QLabel("Category:"))
         self.cat021_check = QCheckBox("CAT021")
         self.cat021_check.setChecked(True)
-        # ✅ Don't connect to stateChanged
         layout.addWidget(self.cat021_check)
 
         self.cat048_check = QCheckBox("CAT048")
         self.cat048_check.setChecked(True)
-        # ✅ Don't connect to stateChanged
         layout.addWidget(self.cat048_check)
 
-        # ✅ NEW: Apply Filters button
+        # Apply Filters button
         self.apply_filter_btn = QPushButton("✅ Apply Filters")
         self.apply_filter_btn.clicked.connect(self.apply_dynamic_filters)
         self.apply_filter_btn.setEnabled(False)
@@ -254,10 +264,13 @@ class AsterixGUI(QMainWindow):
         self.df_display = df_filtered
         self.display_dataframe(df_filtered)
 
-        # ✅ Enable filter controls
+        # Enable filter controls
         self.export_btn.setEnabled(True)
         self.reset_btn.setEnabled(True)
         self.apply_filter_btn.setEnabled(True)
+
+        # Load data into map
+        self.map_widget.load_data(df_filtered)
 
         cat021_count = (df_filtered['CAT'] == 21).sum()
         cat048_count = (df_filtered['CAT'] == 48).sum()
@@ -330,6 +343,9 @@ class AsterixGUI(QMainWindow):
             self.df_display = df
             self.display_dataframe(df)
 
+            # Update map with filtered data
+            self.map_widget.load_data(df)
+
             cat021_count = (df['CAT'] == 21).sum()
             cat048_count = (df['CAT'] == 48).sum()
 
@@ -354,6 +370,9 @@ class AsterixGUI(QMainWindow):
         if self.df_raw is not None:
             self.df_display = self.df_raw.copy()
             self.display_dataframe(self.df_display)
+
+            # Update map with reset data
+            self.map_widget.load_data(self.df_display)
 
             cat021_count = (self.df_display['CAT'] == 21).sum()
             cat048_count = (self.df_display['CAT'] == 48).sum()
