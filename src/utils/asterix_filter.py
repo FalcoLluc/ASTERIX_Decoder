@@ -48,20 +48,20 @@ class AsterixFilter:
     @staticmethod
     def filter_on_ground(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Filter for aircraft on ground.
+        Filter for aircraft on ground using any available indicator.
         CAT021: GBS=1 (on ground)
-        CAT048: STAT in [1, 3] (on ground)
+        CAT048: STAT_code in [1, 3] (on ground)
         """
-        # Try CAT021 GBS field
+        if 'STAT_code' not in df.columns and 'GBS' not in df.columns:
+            return df
+
+        mask = pd.Series(False, index=df.index)
+        if 'STAT_code' in df.columns:
+            mask = mask | df['STAT_code'].isin([1, 3])
         if 'GBS' in df.columns:
-            return df[df['GBS'] == 1].reset_index(drop=True)
+            mask = mask | (df['GBS'] == 1)
 
-        # Try CAT048 STAT field
-        if 'STAT' in df.columns:
-            ground_mask = df['STAT'].isin([1, 3, 'On Ground'])
-            return df[ground_mask].reset_index(drop=True)
-
-        return df
+        return df[mask].reset_index(drop=True)
 
     @staticmethod
     def filter_by_altitude(df: pd.DataFrame,

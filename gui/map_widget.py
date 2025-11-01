@@ -154,7 +154,7 @@ class MapWidget(QWidget):
             return (bearing + 360) % 360;
         }
 
-        // Function to calculate opacity based on segment age - STRONG AT START
+        // Function to calculate opacity based on segment age
         function calculateOpacity(segmentIndex, totalSegments) {
             var maxSegments = 50;
             var relativeAge = (totalSegments - segmentIndex) / maxSegments;
@@ -162,7 +162,6 @@ class MapWidget(QWidget):
             if (relativeAge > 1) relativeAge = 1;
             if (relativeAge < 0) relativeAge = 0;
 
-            // Strong opacity at recent segments (0.85), fades to 0.15
             var opacity = 0.85 * relativeAge;
             if (opacity < 0.15) opacity = 0.15;
             return opacity;
@@ -261,10 +260,35 @@ class MapWidget(QWidget):
         self.web_view.setHtml(html)
 
     def load_data(self, df: pd.DataFrame):
-        self.df = df.copy()
+        """Load data into map widget for playback"""
+        if df is None or df.empty:
+            print("⚠️ MapWidget: Received empty DataFrame")
+            self.play_btn.setEnabled(False)
+            self.reset_btn.setEnabled(False)
+            return
+
+        # ✅ FIX: Check if required columns exist
+        required_cols = ['LAT', 'LON', 'Time_sec']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            print(f"⚠️ MapWidget: Missing required columns: {missing_cols}")
+            self.play_btn.setEnabled(False)
+            self.reset_btn.setEnabled(False)
+            return
+
+        # Avoid full copy: select only needed columns and filter progressively
+        needed = [c for c in ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS(kt)'] if c in df.columns]
+        self.df = df[needed]
 
         # Filter valid positions
         self.df = self.df.dropna(subset=['LAT', 'LON', 'Time_sec'])
+
+        # ✅ FIX: Verify we still have data after filtering
+        if self.df.empty:
+            print("⚠️ MapWidget: No valid position data after filtering")
+            self.play_btn.setEnabled(False)
+            self.reset_btn.setEnabled(False)
+            return
 
         # Sort by time
         self.df = self.df.sort_values('Time_sec')
@@ -326,30 +350,56 @@ class MapWidget(QWidget):
         self.time_label.setText(f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}")
 
     def update_aircraft_positions(self):
-        if self.df is None:
+        """Update aircraft positions on map"""
+        if self.df is None or self.df.empty:
             return
 
-        time_window = 5
-        mask = (self.df['Time_sec'] >= self.current_time - time_window) & \
-               (self.df['Time_sec'] <= self.current_time + time_window)
+        try:
+            time_window = 5
+            mask = (self.df['Time_sec'] >= self.current_time - time_window) & \
+                   (self.df['Time_sec'] <= self.current_time + time_window)
 
-        current_aircraft = self.df[mask]
-        latest_positions = current_aircraft.sort_values('Time_sec').groupby('TA').last()
+            current_aircraft = self.df[mask]
 
-        aircraft_data = []
-        for address, row in latest_positions.iterrows():
-            if pd.notna(row['LAT']) and pd.notna(row['LON']):
-                aircraft_data.append({
-                    'address': address,
-                    'callsign': row.get('TI', ''),
-                    'lat': float(row['LAT']),
-                    'lon': float(row['LON']),
-                    'fl': float(row['FL']) if pd.notna(row['FL']) else None,
-                    'speed': float(row['GS']) if pd.notna(row.get('GS')) else None,
-                    'cat': int(row['CAT'])
-                })
+            # ✅ FIX: Check if TA column exists before groupby
+            if 'TA' not in current_aircraft.columns:
+                print("⚠️ MapWidget: 'TA' column not found in filtered data")
+                self.aircraft_label.setText("Aircraft: 0")
+                return
 
-        self.aircraft_label.setText(f"Aircraft: {len(aircraft_data)}")
+            # ✅ FIX: Check if there's any data after time filtering
+            if current_aircraft.empty:
+                self.aircraft_label.setText("Aircraft: 0")
+                return
 
-        js_code = f"updateAircraft({json.dumps(aircraft_data)});"
-        self.web_view.page().runJavaScript(js_code)
+            # ✅ FIX: Add observed=False to silence FutureWarning
+            # This tells pandas to use current behavior (not future behavior)
+            # observed=False: Include all category values, even if not present in data
+            # observed=True:  Only include category values that are actually present
+            latest_positions = current_aircraft.sort_values('Time_sec').groupby('TA', observed=True).last()
+
+            aircraft_data = []
+            for address, row in latest_positions.iterrows():
+                if pd.notna(row['LAT']) and pd.notna(row['LON']):
+                    aircraft_data.append({
+                        'address': str(address),
+                        'callsign': str(row.get('TI', '')) if pd.notna(row.get('TI')) else '',
+                        'lat': float(row['LAT']),
+                        'lon': float(row['LON']),
+                        'fl': float(row['FL']) if pd.notna(row.get('FL')) else None,
+                        'speed': float(row['GS(kt)']) if pd.notna(row.get('GS(kt)')) else None,
+                        'cat': int(row['CAT']) if pd.notna(row.get('CAT')) else 0
+                    })
+
+            self.aircraft_label.setText(f"Aircraft: {len(aircraft_data)}")
+
+            if aircraft_data:
+                js_code = f"updateAircraft({json.dumps(aircraft_data)});"
+                self.web_view.page().runJavaScript(js_code)
+
+        except Exception as e:
+            print(f"❌ MapWidget.update_aircraft_positions() error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.aircraft_label.setText("Aircraft: Error")
+

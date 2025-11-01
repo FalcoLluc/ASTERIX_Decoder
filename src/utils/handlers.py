@@ -5,26 +5,20 @@ from src.types.enums import Category
 from typing import List
 import logging
 
+_cat021_decoder = Cat021Decoder()
+_cat048_decoder = Cat048Decoder()
+
 def decode_records(records: List[Record]) -> List[Record]:
     """
     Decode a list of records by routing each to the appropriate decoder based on category.
 
-    Args:
-        records: List of Record objects with raw data
-
-    Returns:
-        Same list of records, now with decoded items populated
+    Uses module-level singleton decoders to avoid repeated initialization.
     """
-    # Initialize decoders
-    cat021_decoder = Cat021Decoder()
-    cat048_decoder = Cat048Decoder()
-
-    # Decode each record based on its category
     for record in records:
         if record.category == Category.CAT021:
-            cat021_decoder.decode_record(record)
+            _cat021_decoder.decode_record(record)
         elif record.category == Category.CAT048:
-            cat048_decoder.decode_record(record)
+            _cat048_decoder.decode_record(record)
         else:
             logging.warning(f"Unknown category: {record.category}")
 
