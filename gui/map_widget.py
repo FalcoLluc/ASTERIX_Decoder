@@ -1,8 +1,10 @@
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import QUrl, QTimer, Signal, Slot, Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel
+from PySide6.QtGui import QShortcut, QKeySequence
 import pandas as pd
 import json
+import hashlib
 
 
 class MapWidget(QWidget):
@@ -15,6 +17,8 @@ class MapWidget(QWidget):
         self.max_time = 0
         self.is_playing = False
         self.speed_multiplier = 1.0
+        self._user_scrubbing = False
+        self._was_playing = False
 
         self.init_ui()
 
@@ -45,7 +49,7 @@ class MapWidget(QWidget):
         self.speed_slider = QSlider()
         self.speed_slider.setOrientation(Qt.Orientation.Horizontal)
         self.speed_slider.setMinimum(1)
-        self.speed_slider.setMaximum(10)
+        self.speed_slider.setMaximum(60)
         self.speed_slider.setValue(1)
         self.speed_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.speed_slider.valueChanged.connect(self.on_speed_changed)
@@ -54,8 +58,26 @@ class MapWidget(QWidget):
         self.speed_label = QLabel("1x")
         control_layout.addWidget(self.speed_label)
 
-        # Time display
-        self.time_label = QLabel("Time: --:--:--")
+        # Time selector (legend)
+        control_layout.addWidget(QLabel("Time:"))
+        self.time_start_label = QLabel("--:--:--")
+        control_layout.addWidget(self.time_start_label)
+
+        self.time_slider = QSlider()
+        self.time_slider.setOrientation(Qt.Orientation.Horizontal)
+        self.time_slider.setMinimum(0)
+        self.time_slider.setMaximum(0)
+        self.time_slider.setEnabled(False)
+        self.time_slider.sliderPressed.connect(self._on_time_slider_pressed)
+        self.time_slider.sliderReleased.connect(self._on_time_slider_released)
+        self.time_slider.valueChanged.connect(self._on_time_slider_changed)
+        control_layout.addWidget(self.time_slider, stretch=1)
+
+        self.time_end_label = QLabel("--:--:--")
+        control_layout.addWidget(self.time_end_label)
+
+        # Current time display
+        self.time_label = QLabel("Now: --:--:--")
         control_layout.addWidget(self.time_label)
 
         # Aircraft count
@@ -71,8 +93,23 @@ class MapWidget(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_simulation)
 
+        # ✅ Keyboard shortcuts
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self.toggle_play)
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self.skip_time(-10))
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self.skip_time(10))
+
         # Load initial empty map
         self.load_base_map()
+
+    def _format_hms(self, seconds: float) -> str:
+        try:
+            s = int(max(0, seconds))
+            h = s // 3600
+            m = (s % 3600) // 60
+            sec = s % 60
+            return f"{h:02d}:{m:02d}:{sec:02d}"
+        except Exception:
+            return "--:--:--"
 
     def load_base_map(self):
         html = """
@@ -107,6 +144,21 @@ class MapWidget(QWidget):
         .leaflet-popup-tip {
             background: rgba(255, 255, 255, 0.95) !important;
         }
+
+        /* Legend styling */
+        .info.legend {
+            background: rgba(255,255,255,0.9);
+            padding: 8px 10px;
+            border-radius: 6px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            line-height: 1.4em;
+            font: 12px/1.4 'Segoe UI', Arial, sans-serif;
+        }
+        .legend .item { display: flex; align-items: center; margin: 4px 0; }
+        .legend .swatch {
+            width: 14px; height: 14px; margin-right: 6px; border-radius: 2px;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
@@ -137,12 +189,47 @@ class MapWidget(QWidget):
             .bindPopup('<b>Barcelona Radar</b><br>SAC: 20, SIC: 129')
             .addTo(map);
 
+        // Add legend
+        var legend = L.control({position: 'topright'});
+        legend.onAdd = function () {
+            var div = L.DomUtil.create('div', 'info legend');
+            div.innerHTML = '<strong>Detection Source</strong><br>' +
+                '<div class="item"><span class="swatch" style="background:#FFD700"></span>ADS-B (CAT021)</div>' +
+                '<div class="item"><span class="swatch" style="background:#FF4D4D"></span>Radar (CAT048)</div>' +
+                '<div class="item"><span class="swatch" style="background:#00E5FF"></span>Both Systems</div>';
+            return div;
+        };
+        legend.addTo(map);
+
         // Storage for aircraft markers and PERMANENT trails
         var aircraftMarkers = {};
         var aircraftTrails = {};
         var permanentTrails = [];
         var trailSegmentCount = {};
         var previousPositions = {};
+        var aircraftColors = {};  // ✅ Store consistent colors per aircraft
+
+        // ✅ Generate deterministic color from aircraft address
+        function getAircraftColor(address) {
+            if (aircraftColors[address]) {
+                return aircraftColors[address];
+            }
+
+            // Use hash of address to generate consistent color
+            var hash = 0;
+            for (var i = 0; i < address.length; i++) {
+                hash = address.charCodeAt(i) + ((hash << 5) - hash);
+            }
+
+            // Generate vibrant HSL color
+            var hue = Math.abs(hash % 360);
+            var saturation = 70 + (Math.abs(hash >> 8) % 20);  // 70-90%
+            var lightness = 50 + (Math.abs(hash >> 16) % 15);  // 50-65%
+
+            var color = 'hsl(' + hue + ', ' + saturation + '%, ' + lightness + '%)';
+            aircraftColors[address] = color;
+            return color;
+        }
 
         // Function to calculate bearing between two points
         function getBearing(lat1, lon1, lat2, lon2) {
@@ -189,9 +276,15 @@ class MapWidget(QWidget):
                 // Store previous position for next iteration
                 previousPositions[aircraft.address] = {lat: aircraft.lat, lon: aircraft.lon};
 
-                // AIRPLANE ROTATED TOWARD DIRECTION
+                // ✅ Use unique color for each aircraft's trail
+                var trailColor = getAircraftColor(aircraft.address);
+
+                // Marker uses detection type badge color
+                var badgeColor = aircraft.both ? '#00E5FF' : (aircraft.cat === 48 ? '#FF4D4D' : '#FFD700');
+
+                // AIRPLANE ROTATED TOWARD DIRECTION with badge color
                 var icon = L.divIcon({
-                    html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5);">✈</div>',
+                    html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>',
                     className: 'aircraft-marker',
                     iconSize: [26, 26],
                     iconAnchor: [13, 13]
@@ -202,7 +295,7 @@ class MapWidget(QWidget):
                     zIndexOffset: 500
                 }).bindPopup(
                     '<b>' + (aircraft.callsign || aircraft.address) + '</b><br>' +
-                    '<strong>CAT:</strong> ' + aircraft.cat + '<br>' +
+                    '<strong>CAT:</strong> ' + aircraft.cat + (aircraft.both ? ' (Both)' : '') + '<br>' +
                     '<strong>FL:</strong> ' + (aircraft.fl !== null ? Math.round(aircraft.fl) : 'N/A') + '<br>' +
                     '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
                     '<strong>Heading:</strong> ' + Math.round(rotation) + '°'
@@ -227,9 +320,9 @@ class MapWidget(QWidget):
                     var segmentIndex = trailSegmentCount[aircraft.address];
                     var opacity = calculateOpacity(segmentIndex, trailSegmentCount[aircraft.address]);
 
-                    // Create segment from previous to current point with calculated opacity
+                    // ✅ Use unique aircraft color for trail
                     var segment = L.polyline([prevPoint, lastPoint], {
-                        color: aircraft.cat === 48 ? '#FF4D4D' : '#FFD700',
+                        color: trailColor,
                         weight: 2.5,
                         opacity: opacity,
                         lineCap: 'round'
@@ -248,6 +341,7 @@ class MapWidget(QWidget):
             aircraftTrails = {};
             trailSegmentCount = {};
             previousPositions = {};
+            aircraftColors = {};  // ✅ Reset colors on trail reset
         }
 
         // Expose functions to Python
@@ -265,42 +359,81 @@ class MapWidget(QWidget):
             print("⚠️ MapWidget: Received empty DataFrame")
             self.play_btn.setEnabled(False)
             self.reset_btn.setEnabled(False)
+            self.time_slider.setEnabled(False)
+            self.time_start_label.setText("--:--:--")
+            self.time_end_label.setText("--:--:--")
+            self.time_label.setText("Now: --:--:--")
             return
 
-        # ✅ FIX: Check if required columns exist
         required_cols = ['LAT', 'LON', 'Time_sec']
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             print(f"⚠️ MapWidget: Missing required columns: {missing_cols}")
             self.play_btn.setEnabled(False)
             self.reset_btn.setEnabled(False)
+            self.time_slider.setEnabled(False)
             return
 
-        # Avoid full copy: select only needed columns and filter progressively
+        # Select only needed columns
         needed = [c for c in ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS(kt)'] if c in df.columns]
         self.df = df[needed]
 
         # Filter valid positions
         self.df = self.df.dropna(subset=['LAT', 'LON', 'Time_sec'])
 
-        # ✅ FIX: Verify we still have data after filtering
         if self.df.empty:
             print("⚠️ MapWidget: No valid position data after filtering")
             self.play_btn.setEnabled(False)
             self.reset_btn.setEnabled(False)
+            self.time_slider.setEnabled(False)
             return
 
         # Sort by time
         self.df = self.df.sort_values('Time_sec')
 
+        # Compute detection system presence per aircraft
+        try:
+            tas_series = self.df['TA'] if 'TA' in self.df.columns else None
+            cat_series = self.df['CAT'] if 'CAT' in self.df.columns else None
+            if tas_series is not None and cat_series is not None:
+                self.tas_adsb = set(tas_series[cat_series == 21].dropna().astype(str).unique())
+                self.tas_radar = set(tas_series[cat_series == 48].dropna().astype(str).unique())
+                self.tas_both = self.tas_adsb.intersection(self.tas_radar)
+            else:
+                self.tas_adsb = set()
+                self.tas_radar = set()
+                self.tas_both = set()
+        except Exception:
+            self.tas_adsb = set()
+            self.tas_radar = set()
+            self.tas_both = set()
+
         # Set time range
-        self.min_time = self.df['Time_sec'].min()
-        self.max_time = self.df['Time_sec'].max()
+        self.min_time = float(self.df['Time_sec'].min())
+        self.max_time = float(self.df['Time_sec'].max())
         self.current_time = self.min_time
 
         # Enable controls
         self.play_btn.setEnabled(True)
         self.reset_btn.setEnabled(True)
+
+        # ✅ Initialize time slider with adaptive resolution
+        duration = self.max_time - self.min_time
+        if duration > 3600:  # > 1 hour
+            self.time_slider.setSingleStep(10)
+            self.time_slider.setPageStep(60)
+        else:
+            self.time_slider.setSingleStep(1)
+            self.time_slider.setPageStep(10)
+
+        min_int = int(self.min_time)
+        max_int = int(self.max_time) if self.max_time >= self.min_time else int(self.min_time)
+        self.time_slider.setRange(min_int, max_int)
+        self.time_slider.setValue(int(self.current_time))
+        self.time_slider.setEnabled(True)
+
+        self.time_start_label.setText(self._format_hms(self.min_time))
+        self.time_end_label.setText(self._format_hms(self.max_time))
 
         # Update display
         self.update_time_label()
@@ -326,12 +459,48 @@ class MapWidget(QWidget):
 
         # Reset trails on map
         self.web_view.page().runJavaScript("resetTrails();")
+        self.update_aircraft_positions()
 
+    def skip_time(self, seconds: float):
+        """Skip forward/backward by specified seconds (keyboard shortcut)"""
+        if self.df is None:
+            return
+
+        self.current_time = max(self.min_time, min(self.max_time, self.current_time + seconds))
+        self.update_time_label()
         self.update_aircraft_positions()
 
     def on_speed_changed(self, value):
         self.speed_multiplier = value
         self.speed_label.setText(f"{value}x")
+
+    # ===== Time slider handlers =====
+    def _on_time_slider_pressed(self):
+        self._user_scrubbing = True
+        self._was_playing = self.is_playing
+        if self.is_playing:
+            self.is_playing = False
+            self.timer.stop()
+            self.play_btn.setText("▶ Play")
+
+    def _on_time_slider_released(self):
+        self._user_scrubbing = False
+        if self._was_playing:
+            self.is_playing = True
+            self.play_btn.setText("⏸ Pause")
+            self.timer.start(1000)
+
+    def _on_time_slider_changed(self, value: int):
+        if self._user_scrubbing or not hasattr(self, 'min_time'):
+            try:
+                min_v = self.time_slider.minimum()
+                max_v = self.time_slider.maximum()
+                v = max(min_v, min(max_v, int(value)))
+                self.current_time = float(v)
+                self.update_time_label()
+                self.update_aircraft_positions()
+            except Exception as e:
+                print(f"⚠️ Time slider change error: {e}")
 
     def update_simulation(self):
         self.current_time += self.speed_multiplier
@@ -344,10 +513,15 @@ class MapWidget(QWidget):
         self.update_aircraft_positions()
 
     def update_time_label(self):
-        hours = int(self.current_time // 3600)
-        minutes = int((self.current_time % 3600) // 60)
-        seconds = int(self.current_time % 60)
-        self.time_label.setText(f"Time: {hours:02d}:{minutes:02d}:{seconds:02d}")
+        self.time_label.setText(f"Now: {self._format_hms(self.current_time)}")
+
+        # ✅ IMPROVED: Use blockSignals to prevent recursion
+        if hasattr(self, 'time_slider') and self.time_slider.isEnabled() and not self._user_scrubbing:
+            self.time_slider.blockSignals(True)
+            try:
+                self.time_slider.setValue(int(self.current_time))
+            finally:
+                self.time_slider.blockSignals(False)
 
     def update_aircraft_positions(self):
         """Update aircraft positions on map"""
@@ -361,45 +535,47 @@ class MapWidget(QWidget):
 
             current_aircraft = self.df[mask]
 
-            # ✅ FIX: Check if TA column exists before groupby
-            if 'TA' not in current_aircraft.columns:
-                print("⚠️ MapWidget: 'TA' column not found in filtered data")
+            if 'TA' not in current_aircraft.columns or current_aircraft.empty:
                 self.aircraft_label.setText("Aircraft: 0")
                 return
 
-            # ✅ FIX: Check if there's any data after time filtering
-            if current_aircraft.empty:
-                self.aircraft_label.setText("Aircraft: 0")
-                return
-
-            # ✅ FIX: Add observed=False to silence FutureWarning
-            # This tells pandas to use current behavior (not future behavior)
-            # observed=False: Include all category values, even if not present in data
-            # observed=True:  Only include category values that are actually present
             latest_positions = current_aircraft.sort_values('Time_sec').groupby('TA', observed=True).last()
 
             aircraft_data = []
+            both_set = getattr(self, 'tas_both', set())
+
             for address, row in latest_positions.iterrows():
                 if pd.notna(row['LAT']) and pd.notna(row['LON']):
+                    addr_str = str(address)
                     aircraft_data.append({
-                        'address': str(address),
+                        'address': addr_str,
                         'callsign': str(row.get('TI', '')) if pd.notna(row.get('TI')) else '',
                         'lat': float(row['LAT']),
                         'lon': float(row['LON']),
                         'fl': float(row['FL']) if pd.notna(row.get('FL')) else None,
                         'speed': float(row['GS(kt)']) if pd.notna(row.get('GS(kt)')) else None,
-                        'cat': int(row['CAT']) if pd.notna(row.get('CAT')) else 0
+                        'cat': int(row['CAT']) if pd.notna(row.get('CAT')) else 0,
+                        'both': addr_str in both_set
                     })
 
-            self.aircraft_label.setText(f"Aircraft: {len(aircraft_data)}")
-
+            # ✅ IMPROVED: Show breakdown
             if aircraft_data:
+                adsb_count = sum(1 for a in aircraft_data if a['cat'] == 21)
+                radar_count = sum(1 for a in aircraft_data if a['cat'] == 48)
+                both_count = sum(1 for a in aircraft_data if a['both'])
+
+                self.aircraft_label.setText(
+                    f"Aircraft: {len(aircraft_data)} "
+                    f"(ADS-B: {adsb_count}, Radar: {radar_count}, Both: {both_count})"
+                )
+
                 js_code = f"updateAircraft({json.dumps(aircraft_data)});"
                 self.web_view.page().runJavaScript(js_code)
+            else:
+                self.aircraft_label.setText("Aircraft: 0")
 
         except Exception as e:
             print(f"❌ MapWidget.update_aircraft_positions() error: {str(e)}")
             import traceback
             traceback.print_exc()
             self.aircraft_label.setText("Aircraft: Error")
-
