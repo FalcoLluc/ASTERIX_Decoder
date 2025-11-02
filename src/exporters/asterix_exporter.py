@@ -456,7 +456,7 @@ class AsterixExporter:
             'ModeS': 'BDS registers present',
             'BP': 'Barometric Pressure Setting (hPa)',
             'GS(kt)': 'Ground Speed (knots, radar or BDS 5.0)',
-            'HDG': 'Heading (degrees, radar-measured)',
+            'HDG': 'Heading (degrees, TRACK_VELOCITY_POLAR)',
             'MG_HDG': 'Magnetic Heading (degrees, BDS 6.0)',
             'TTA': 'True Track Angle (degrees, BDS 5.0)',
             'RA': 'Roll Angle (degrees, BDS 5.0)',
