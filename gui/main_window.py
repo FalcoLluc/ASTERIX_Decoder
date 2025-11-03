@@ -1,5 +1,3 @@
-# gui/asterix_gui.py (FIXED & OPTIMIZED)
-
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTableView, QLabel, QLineEdit, QSpinBox,
@@ -18,7 +16,6 @@ from src.decoders.asterix_file_reader import AsterixFileReader
 from src.exporters.asterix_exporter import AsterixExporter
 from src.utils.asterix_filter import AsterixFilter
 from src.utils.handlers import decode_records
-
 
 # ============================================================
 # COLUMN DEFINITIONS FOR EACH CATEGORY
@@ -43,7 +40,6 @@ CAT048_COLUMNS = [
     'MG_HDG', 'IAS', 'MACH', 'BAR', 'IVV',
     'STAT_code', 'STAT',
 ]
-
 
 # ============================================================
 # BACKGROUND THREAD
@@ -446,14 +442,20 @@ class AsterixGUI(QMainWindow):
             if self.geo_filter_check.isChecked():
                 df = AsterixFilter.filter_by_geographic_bounds(df)
 
-            # Apply final result
             self.df_display = df
+
+            cats_in_data = set(self.df_display['CAT'].unique()) if 'CAT' in self.df_display.columns else set()
+            only_cat021 = (cats_in_data == {21})
+            self.airborne_check.setEnabled(not only_cat021)
+            self.ground_check.setEnabled(not only_cat021)
+            if only_cat021:
+                self.airborne_check.setChecked(False)
+                self.ground_check.setChecked(False)
 
             self.display_dataframe(self.df_display)
             self.update_map()
             self.update_status_label()
 
-            # Clear dirty state
             self.filters_dirty = False
             self.apply_btn.setEnabled(False)
 
@@ -503,14 +505,11 @@ class AsterixGUI(QMainWindow):
         """Update status bar with filter statistics"""
         if self.df_display is None:
             return
-
         cat021_count = (self.df_display['CAT'] == 21).sum() if 'CAT' in self.df_display.columns else 0
         cat048_count = (self.df_display['CAT'] == 48).sum() if 'CAT' in self.df_display.columns else 0
-
+        total_count = len(self.df_display)
         self.status_label.setText(
-            f"📊 Displaying: {len(self.df_display):,} records "
-            f"(CAT021: {cat021_count:,}, CAT048: {cat048_count:,}) | "
-            f"Total: {len(self.df_raw):,} records"
+            f"📊 Displaying: {total_count:,} records (CAT021: {cat021_count:,}, CAT048: {cat048_count:,}) | Total: {total_count:,} records"
         )
 
     # ============================================================

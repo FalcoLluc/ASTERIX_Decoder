@@ -1,33 +1,3 @@
-"""
-ASTERIX Data Exporter
----------------------
-Unified exporter for CAT021 and CAT048 ASTERIX categories with QNH correction.
-Optimized for memory efficiency with dtype downcasting and view-based filtering.
-
-Column Definitions:
-------------------
-BP: Barometric Pressure Setting (hPa/mb)
-    - CAT048 BDS 4.0: BP in mb (1 mb = 1 hPa)
-    - CAT021 RE Field: BP in hPa
-    - Both use same unit with 800 hPa offset applied during decoding
-
-GS(kt): Ground Speed (knots)
-    - CAT048: From TRACK_VELOCITY_POLAR (radar) or BDS 5.0 (aircraft)
-    - Precedence: Radar measurement preferred, BDS 5.0 as fallback
-
-HDG: Heading (degrees) - Radar-measured
-    - CAT048 TRACK_VELOCITY_POLAR only
-    - Measured by radar tracking system
-
-MG_HDG: Magnetic Heading (degrees) - Aircraft-reported
-    - CAT048 BDS 6.0 only
-    - From aircraft's navigation system
-
-TTA: True Track Angle (degrees) - Aircraft-reported
-    - CAT048 BDS 5.0 only
-    - Aircraft's actual track over ground
-"""
-
 import pandas as pd
 import numpy as np
 from typing import List, Optional
@@ -111,22 +81,6 @@ class AsterixExporter:
 
     @staticmethod
     def records_to_dataframe(records: List[Record], apply_qnh: bool = True) -> pd.DataFrame:
-        """
-        Convert a mixed list of Record objects (any category) to a unified pandas DataFrame.
-        Optionally applies QNH correction during export.
-
-        Memory optimizations:
-        - Builds DataFrame from list of dicts (standard approach)
-        - Immediately applies dtype downcasting to reduce memory footprint
-        - Avoids unnecessary copies during construction
-
-        Args:
-            records: List of Record objects from any ASTERIX category
-            apply_qnh: Whether to apply QNH correction (default: True)
-
-        Returns:
-            pd.DataFrame with unified schema and optimized dtypes
-        """
         rows = []
 
         for record in records:
@@ -142,15 +96,14 @@ class AsterixExporter:
 
         df = pd.DataFrame(rows, columns=AsterixExporter.ALL_COLUMNS)
 
-        # PRIORITY 2: Apply dtype downcasting immediately after DataFrame creation
         df = AsterixExporter._downcast_dtypes(df)
 
-        # Sort by time and aircraft address (use inplace to reduce temporaries)
         if 'Time_sec' in df.columns and 'TA' in df.columns:
             df.sort_values(['Time_sec', 'TA'], na_position='last', inplace=True)
             df.reset_index(drop=True, inplace=True)
 
-        # Apply QNH correction if requested
+        df = df.loc[~((df['CAT'] == 21) & (df['GBS'] == 1))]
+
         if apply_qnh:
             df = AsterixExporter._apply_qnh_correction(df)
 
@@ -158,18 +111,9 @@ class AsterixExporter:
 
     @staticmethod
     def _downcast_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Args:
-            df: DataFrame with default dtypes (mostly int64/float64/object)
-
-        Returns:
-            DataFrame with optimized dtypes matching CSV format
-        """
         if df is None or df.empty:
             return df
 
-        # Integer columns - codes and flags (0/1 values)
-        # These include: SAC, SIC, CAT, RDP, TYP, SIM, SPI, RAB, TST, ATP, ARC, RC, DCR, GBS
         int_cols = [
             'CAT', 'SAC', 'SIC', 'RDP', 'TYP', 'SIM', 'SPI', 'RAB', 'TST', 'STAT_code',
             'ATP', 'ARC', 'RC', 'DCR', 'GBS', 'TN', 'TAS', 'IAS', 'BAR', 'IVV'
@@ -177,13 +121,10 @@ class AsterixExporter:
         for col in int_cols:
             if col in df.columns:
                 try:
-                    # Convert to numeric, then to int64 (preserves None/NaN as NA)
                     df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
                 except (ValueError, TypeError):
                     pass
 
-        # Floating-point measurements - downcast float64 to float32
-        # These include: coordinates, speeds, altitudes, rates, etc.
         float_cols = [
             'LAT', 'LON', 'RHO', 'THETA', 'H(m)', 'H(ft)', 'H_WGS84',
             'GS(kt)', 'HDG', 'MG_HDG', 'TTA', 'RA', 'TAR', 'MACH',
@@ -192,13 +133,10 @@ class AsterixExporter:
         for col in float_cols:
             if col in df.columns:
                 try:
-                    # Convert to numeric first, then float32
                     df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
                 except (ValueError, TypeError):
                     pass
 
-        # Categorical strings for high-cardinality repeated values
-        # Target Address (TA) and Target Identification (TI) repeat frequently
         if 'TA' in df.columns and df['TA'].notna().any():
             try:
                 df['TA'] = df['TA'].astype('category')
@@ -211,28 +149,10 @@ class AsterixExporter:
             except (ValueError, TypeError):
                 pass
 
-        # Keep all other columns as object/string
-        # This includes: Time, Mode3/A, ModeS, STAT, STAT_code
-        # These export correctly as strings in CSV
-
         return df
 
     @staticmethod
     def _apply_qnh_correction(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply QNH correction using aircraft address for state tracking.
-
-        Only populates H(ft) and H(m) for records below transition altitude with valid QNH.
-        Uses per-aircraft state tracking to maintain QNH setting across multiple reports.
-
-        PRIORITY 1: No copy() - adds columns in place to avoid memory doubling.
-
-        Args:
-            df: DataFrame with FL, TA, and BP columns
-
-        Returns:
-            DataFrame with H(ft) and H(m) populated where applicable
-        """
         if 'FL' not in df.columns or 'TA' not in df.columns:
             return df
 
@@ -254,7 +174,6 @@ class AsterixExporter:
                 alt_ft_list.append(None)
                 alt_m_list.append(None)
 
-        # Add columns directly without copying - only H(ft) and H(m) are added
         df['H(ft)'] = alt_ft_list
         df['H(m)'] = alt_m_list
 
@@ -262,11 +181,6 @@ class AsterixExporter:
 
     @staticmethod
     def _process_cat021(record: Record, row: dict) -> None:
-        """
-        Process CAT021-specific items and populate row dictionary.
-
-        CAT021 provides ADS-B data with high-precision WGS-84 coordinates.
-        """
         for item in record.items:
             item_type = item.item_type
             value = item.value
@@ -310,12 +224,6 @@ class AsterixExporter:
 
     @staticmethod
     def _process_cat048(record: Record, row: dict) -> None:
-        """
-        Process CAT048-specific items and populate row dictionary.
-
-        CAT048 provides radar data with polar coordinates and Mode S BDS registers.
-        Implements precedence for speed/heading: radar measurements take priority over BDS.
-        """
         bds_present = []
 
         for item in record.items:
@@ -416,25 +324,11 @@ class AsterixExporter:
 
     @staticmethod
     def export_to_csv(df: pd.DataFrame, output_path: str, na_rep: str = 'N/A') -> None:
-        """
-        Export DataFrame to CSV file.
-
-        Args:
-            df: DataFrame to export
-            output_path: Output file path
-            na_rep: String to represent missing values (default: 'N/A')
-        """
         df.to_csv(output_path, index=False, na_rep=na_rep)
         print(f"✅ Exported {len(df):,} records to {output_path}")
 
     @staticmethod
     def get_column_info() -> dict:
-        """
-        Get detailed information about all columns.
-
-        Returns:
-            Dictionary mapping column names to descriptions
-        """
         return {
             'CAT': 'ASTERIX Category (21=ADS-B, 48=Radar)',
             'SAC': 'System Area Code',

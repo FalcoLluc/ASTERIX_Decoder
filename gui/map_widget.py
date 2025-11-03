@@ -179,7 +179,7 @@ class MapWidget(QWidget):
 
         // Add Barcelona radar position
         var radarIcon = L.divIcon({
-            html: '<div style="font-size: 32px; text-shadow: 0 0 4px rgba(0,0,0,0.5);">📡</div>',
+            html: '<div style="font-size: 32px; text-shadow: 0 0 4px rgba(0,0,0,0.5);">𖦏</div>',
             className: 'aircraft-marker',
             iconSize: [32, 32],
             iconAnchor: [16, 16]
