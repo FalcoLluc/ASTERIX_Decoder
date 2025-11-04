@@ -22,11 +22,8 @@ from src.utils.handlers import decode_records
 # ============================================================
 CAT021_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
-    'LAT', 'LON', 'H_WGS84', 'H(m)', 'H(ft)',
-    'FL', 'TA', 'TI', 'BP',
-    'RA', 'TTA', 'GS(kt)', 'TAR', 'TAS',
-    'HDG', 'MG_HDG', 'IAS', 'MACH', 'BAR', 'IVV',
-    'TYP', 'SIM', 'TST',
+    'LAT', 'LON', 'H(m)', 'H(ft)',
+    'FL', 'TA', 'TI', 'BP', 'SIM', 'TST',
     'ATP', 'ARC', 'RC', 'DCR', 'GBS',
 ]
 
