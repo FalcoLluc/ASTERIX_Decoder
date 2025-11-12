@@ -24,7 +24,7 @@ CAT021_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
     'LAT', 'LON', 'H(m)', 'H(ft)',
     'FL', 'TA', 'TI', 'BP', 'SIM', 'TST',
-    'ATP', 'ARC', 'RC', 'DCR', 'GBS',
+    'ATP', 'ARC', 'RC', 'DCR',  'GBS',
 ]
 
 CAT048_COLUMNS = [
