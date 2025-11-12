@@ -31,7 +31,7 @@ CAT048_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
     'RHO', 'THETA', 'LAT', 'LON', 'H_WGS84',
     'FL', 'TA', 'TI',
-    'TN', 'GS(kt)', 'HDG',
+    'TN','GS_TVP(kt)', 'GS_BDS(kt)', 'HDG',
     'TYP', 'SIM', 'RDP', 'SPI', 'RAB',
     'ModeS', 'BP', 'RA', 'TTA', 'TAR', 'TAS',
     'MG_HDG', 'IAS', 'MACH', 'BAR', 'IVV',
@@ -485,7 +485,7 @@ class AsterixGUI(QMainWindow):
             print("⚠️ No data to display on map")
             return
 
-        map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS(kt)']
+        map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS_TVP(kt)', 'GS_BDS(kt)']
         available_cols = [col for col in map_columns if col in self.df_display.columns]
 
         if len(available_cols) < 3:

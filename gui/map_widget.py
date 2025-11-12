@@ -116,113 +116,125 @@ class MapWidget(QWidget):
 
     def load_base_map(self):
         html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>ASTERIX Radar View</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <style>
-        body { margin: 0; padding: 0; }
-        #map { width: 100%; height: 100vh; }
-        .aircraft-marker { background: transparent; border: none; display: flex; align-items: center; justify-content: center; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); }
-        .leaflet-popup-content { background: rgba(255, 255, 255, 0.95) !important; border-radius: 6px !important; color: #333 !important; font-size: 13px !important; }
-        .leaflet-popup-tip { background: rgba(255, 255, 255, 0.95) !important; }
-        .info.legend { background: rgba(255,255,255,0.9); padding: 8px 10px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); line-height: 1.4em; font: 12px/1.4 'Segoe UI', Arial, sans-serif; }
-        .legend .item { display: flex; align-items: center; margin: 4px 0; }
-        .legend .swatch { width: 14px; height: 14px; margin-right: 6px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2); }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    <script>
-        var map = L.map('map', { zoomControl: true, attributionControl: false }).setView([41.2972, 2.0833], 11);
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-            maxZoom: 19, attribution: '', opacity: 0.95
-        }).addTo(map);
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>ASTERIX Radar View</title>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>
+            body { margin: 0; padding: 0; }
+            #map { width: 100%; height: 100vh; }
+            .aircraft-marker { background: transparent; border: none; display: flex; align-items: center; justify-content: center; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); }
+            .leaflet-popup-content { background: rgba(255, 255, 255, 0.95) !important; border-radius: 6px !important; color: #333 !important; font-size: 13px !important; }
+            .leaflet-popup-tip { background: rgba(255, 255, 255, 0.95) !important; }
+            .info.legend { background: rgba(255,255,255,0.9); padding: 8px 10px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); line-height: 1.4em; font: 12px/1.4 'Segoe UI', Arial, sans-serif; }
+            .legend .item { display: flex; align-items: center; margin: 4px 0; }
+            .legend .swatch { width: 14px; height: 14px; margin-right: 6px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2); }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+        <script>
+            var map = L.map('map', { zoomControl: true, attributionControl: false }).setView([41.2972, 2.0833], 11);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19, attribution: '', opacity: 0.95
+            }).addTo(map);
 
-        var radarIcon = L.divIcon({ html: '<div style="font-size: 32px; text-shadow: 0 0 4px rgba(0,0,0,0.5);">𖦏</div>', className: 'aircraft-marker', iconSize: [32, 32], iconAnchor: [16, 16] });
-        L.marker([41.300702, 2.102058], {icon: radarIcon, zIndexOffset: 1000}).bindPopup('<b>Barcelona Radar</b><br>SAC: 20, SIC: 129').addTo(map);
+            var radarIcon = L.divIcon({ html: '<div style="font-size: 32px; text-shadow: 0 0 4px rgba(0,0,0,0.5);">𖦏</div>', className: 'aircraft-marker', iconSize: [32, 32], iconAnchor: [16, 16] });
+            L.marker([41.300702, 2.102058], {icon: radarIcon, zIndexOffset: 1000}).bindPopup('<b>Barcelona Radar</b><br>SAC: 20, SIC: 129').addTo(map);
 
-        var aircraftMarkers = {};
-        var aircraftTrails = {};
-        var permanentTrails = [];
-        var trailSegmentCount = {};
-        var previousPositions = {};
-        var aircraftColors = {};
+            var legend = L.control({position: 'topright'});
+            legend.onAdd = function () {
+                var div = L.DomUtil.create('div', 'info legend');
+                div.innerHTML = '<strong>Detection Source</strong><br>' +
+                    '<div class="item"><span class="swatch" style="background:#FFA500"></span>ADS-B (CAT021)</div>' +
+                    '<div class="item"><span class="swatch" style="background:#FF4D4D"></span>Radar (CAT048)</div>';
+                return div;
+            };
+            legend.addTo(map);
 
-        function getAircraftColor(address) {
-            if (aircraftColors[address]) return aircraftColors[address];
-            var hash = 0;
-            for (var i = 0; i < address.length; i++) { hash = address.charCodeAt(i) + ((hash << 5) - hash); }
-            var hue = Math.abs(hash % 360);
-            var saturation = 70 + (Math.abs(hash >> 8) % 20);
-            var lightness = 50 + (Math.abs(hash >> 16) % 15);
-            var color = 'hsl(' + hue + ', ' + saturation + '%, ' + lightness + '%)';
-            aircraftColors[address] = color;
-            return color;
-        }
+            var aircraftMarkers = {};
+            var aircraftTrails = {};
+            var permanentTrails = [];
+            var trailSegmentCount = {};
+            var previousPositions = {};
+            var aircraftColors = {};
 
-        function getBearing(lat1, lon1, lat2, lon2) {
-            var dLon = (lon2 - lon1);
-            var y = Math.sin(dLon * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
-            var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) - Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon * Math.PI / 180);
-            var bearing = Math.atan2(y, x) * 180 / Math.PI;
-            return (bearing + 360) % 360;
-        }
+            function getAircraftColor(address) {
+                if (aircraftColors[address]) return aircraftColors[address];
+                var hash = 0;
+                for (var i = 0; i < address.length; i++) { hash = address.charCodeAt(i) + ((hash << 5) - hash); }
+                var hue = Math.abs(hash % 360);
+                var saturation = 70 + (Math.abs(hash >> 8) % 20);
+                var lightness = 50 + (Math.abs(hash >> 16) % 15);
+                var color = 'hsl(' + hue + ', ' + saturation + '%, ' + lightness + '%)';
+                aircraftColors[address] = color;
+                return color;
+            }
 
-        function calculateOpacity(segmentIndex, totalSegments) {
-            var maxSegments = 50;
-            var relativeAge = (totalSegments - segmentIndex) / maxSegments;
-            if (relativeAge > 1) relativeAge = 1;
-            if (relativeAge < 0) relativeAge = 0;
-            var opacity = 0.85 * relativeAge;
-            if (opacity < 0.15) opacity = 0.15;
-            return opacity;
-        }
+            function getBearing(lat1, lon1, lat2, lon2) {
+                var dLon = (lon2 - lon1);
+                var y = Math.sin(dLon * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
+                var x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) - Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon * Math.PI / 180);
+                var bearing = Math.atan2(y, x) * 180 / Math.PI;
+                return (bearing + 360) % 360;
+            }
 
-        window.updateAircraft = function(data) {
-            Object.values(aircraftMarkers).forEach(marker => map.removeLayer(marker));
-            aircraftMarkers = {};
-            data.forEach(function(aircraft) {
-                var rotation = 0;
-                if (previousPositions[aircraft.address]) {
-                    var prevPos = previousPositions[aircraft.address];
-                    rotation = getBearing(prevPos.lat, prevPos.lon, aircraft.lat, aircraft.lon);
-                } else if (aircraftTrails[aircraft.address] && aircraftTrails[aircraft.address].length >= 2) {
-                    var prevPos = aircraftTrails[aircraft.address][aircraftTrails[aircraft.address].length - 2];
-                    rotation = getBearing(prevPos[0], prevPos[1], aircraft.lat, aircraft.lon);
-                }
-                previousPositions[aircraft.address] = {lat: aircraft.lat, lon: aircraft.lon};
-                var trailColor = getAircraftColor(aircraft.address);
-                var badgeColor = aircraft.both ? '#00E5FF' : (aircraft.cat === 48 ? '#FF4D4D' : '#FFD700');
-                var icon = L.divIcon({ html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>', className: 'aircraft-marker', iconSize: [26, 26], iconAnchor: [13, 13] });
-                var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500}).bindPopup('<b>' + (aircraft.callsign || aircraft.address) + '</b><br><strong>CAT:</strong> ' + aircraft.cat + (aircraft.both ? ' (Both)' : '') + '<br><strong>FL:</strong> ' + (aircraft.fl !== null ? Math.round(aircraft.fl) : 'N/A') + '<br><strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br><strong>Heading:</strong> ' + Math.round(rotation) + '°');
-                marker.addTo(map);
-                aircraftMarkers[aircraft.address] = marker;
-                if (!aircraftTrails[aircraft.address]) { aircraftTrails[aircraft.address] = []; trailSegmentCount[aircraft.address] = 0; }
-                aircraftTrails[aircraft.address].push([aircraft.lat, aircraft.lon]);
-                if (aircraftTrails[aircraft.address].length > 1) {
-                    var trail = aircraftTrails[aircraft.address];
-                    var lastPoint = trail[trail.length - 1];
-                    var prevPoint = trail[trail.length - 2];
-                    var segmentIndex = trailSegmentCount[aircraft.address];
-                    var opacity = calculateOpacity(segmentIndex, trailSegmentCount[aircraft.address]);
-                    var segment = L.polyline([prevPoint, lastPoint], { color: trailColor, weight: 2.5, opacity: opacity, lineCap: 'round' }).addTo(map);
-                    permanentTrails.push(segment);
-                    trailSegmentCount[aircraft.address]++;
-                }
-            });
-        };
+            function calculateOpacity(segmentIndex, totalSegments) {
+                var maxSegments = 50;
+                var relativeAge = (totalSegments - segmentIndex) / maxSegments;
+                if (relativeAge > 1) relativeAge = 1;
+                if (relativeAge < 0) relativeAge = 0;
+                var opacity = 0.85 * relativeAge;
+                if (opacity < 0.15) opacity = 0.15;
+                return opacity;
+            }
 
-        window.resetTrails = function() {
-            permanentTrails.forEach(trail => map.removeLayer(trail));
-            permanentTrails = []; aircraftTrails = {}; trailSegmentCount = {}; previousPositions = {}; aircraftColors = {};
-        };
-    </script>
-</body>
-</html>
+            window.updateAircraft = function(data) {
+                Object.values(aircraftMarkers).forEach(marker => map.removeLayer(marker));
+                aircraftMarkers = {};
+                data.forEach(function(aircraft) {
+                    var markerId = aircraft.address + '_' + (aircraft.cat === 48 ? '48' : '21');
+                    var rotation = 0;
+                    if (previousPositions[markerId]) {
+                        var prevPos = previousPositions[markerId];
+                        rotation = getBearing(prevPos.lat, prevPos.lon, aircraft.lat, aircraft.lon);
+                    } else if (aircraftTrails[markerId] && aircraftTrails[markerId].length >= 2) {
+                        var prevPos = aircraftTrails[markerId][aircraftTrails[markerId].length - 2];
+                        rotation = getBearing(prevPos[0], prevPos[1], aircraft.lat, aircraft.lon);
+                    }
+                    previousPositions[markerId] = {lat: aircraft.lat, lon: aircraft.lon};
+                    var trailColor = getAircraftColor(aircraft.address);
+                    var badgeColor = (aircraft.cat === 48 ? '#FF4D4D' : '#FFA500');
+                    var srcText = (aircraft.cat === 48 ? 'Radar (CAT048)' : 'ADS-B (CAT021)');
+                    var icon = L.divIcon({ html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>', className: 'aircraft-marker', iconSize: [26, 26], iconAnchor: [13, 13] });
+                    var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500}).bindPopup('<b>' + (aircraft.callsign || aircraft.address) + '</b><br><strong>Source:</strong> ' + srcText + '<br><strong>FL:</strong> ' + (aircraft.fl !== null ? Math.round(aircraft.fl) : 'N/A') + '<br><strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br><strong>Heading:</strong> ' + Math.round(rotation) + '°');
+                    marker.addTo(map);
+                    aircraftMarkers[markerId] = marker;
+                    if (!aircraftTrails[markerId]) { aircraftTrails[markerId] = []; trailSegmentCount[markerId] = 0; }
+                    aircraftTrails[markerId].push([aircraft.lat, aircraft.lon]);
+                    if (aircraftTrails[markerId].length > 1) {
+                        var trail = aircraftTrails[markerId];
+                        var lastPoint = trail[trail.length - 1];
+                        var prevPoint = trail[trail.length - 2];
+                        var segmentIndex = trailSegmentCount[markerId];
+                        var opacity = calculateOpacity(segmentIndex, trailSegmentCount[markerId]);
+                        var segment = L.polyline([prevPoint, lastPoint], { color: trailColor, weight: 2.5, opacity: opacity, lineCap: 'round' }).addTo(map);
+                        permanentTrails.push(segment);
+                        trailSegmentCount[markerId]++;
+                    }
+                });
+            };
+
+            window.resetTrails = function() {
+                permanentTrails.forEach(trail => map.removeLayer(trail));
+                permanentTrails = []; aircraftTrails = {}; trailSegmentCount = {}; previousPositions = {}; aircraftColors = {};
+            };
+        </script>
+    </body>
+    </html>
         """
         self.web_view.setHtml(html)
 
@@ -530,8 +542,10 @@ class MapWidget(QWidget):
             self.time_slider.setEnabled(False)
             return
 
-        needed = [c for c in ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS(kt)'] if c in df.columns]
+        needed = [c for c in ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS(kt)', 'GS_TVP(kt)', 'GS_BDS(kt)'] if c in df.columns]
         self.df = df[needed].dropna(subset=['LAT', 'LON', 'Time_sec']).sort_values('Time_sec')
+        # Storage for last known radar positions (by TA as string)
+        self._last_radar_by_ta = {}
 
         try:
             tas_series = self.df['TA'] if 'TA' in self.df.columns else None
@@ -653,28 +667,90 @@ class MapWidget(QWidget):
             self.aircraft_label.setText("Aircraft: 0")
             return
 
-        latest_positions = current_aircraft.sort_values('Time_sec').groupby('TA', observed=True).last()
+        # Compute latest per TA per CAT
+        current_sorted = current_aircraft.sort_values('Time_sec')
+        latest_by_ta_cat = {}
+        for _, row in current_sorted.iterrows():
+            ta = str(row.get('TA')) if pd.notna(row.get('TA')) else None
+            cat = int(row.get('CAT')) if pd.notna(row.get('CAT')) else None
+            if ta is None or cat not in (21, 48):
+                continue
+            latest_by_ta_cat[(ta, cat)] = row
+
+        # Build data allowing duplicates per TA (one per source)
         aircraft_data = []
+        tas_seen = set([str(x) for x in current_sorted['TA'].dropna().unique()])
         both_set = getattr(self, 'tas_both', set())
 
-        for address, row in latest_positions.iterrows():
-            if pd.notna(row['LAT']) and pd.notna(row['LON']):
-                addr_str = str(address)
+        for ta in tas_seen:
+            adsb_row = latest_by_ta_cat.get((ta, 21))
+            radar_row = latest_by_ta_cat.get((ta, 48))
+
+            # Update last known radar position if present
+            if radar_row is not None and pd.notna(radar_row.get('LAT')) and pd.notna(radar_row.get('LON')):
+                self._last_radar_by_ta[ta] = {
+                    'lat': float(radar_row['LAT']),
+                    'lon': float(radar_row['LON']),
+                    'fl': float(radar_row['FL']) if pd.notna(radar_row.get('FL')) else None,
+                    'time': float(radar_row['Time_sec'])
+                }
+
+            # Helper to choose speed with priority GS_TVP(kt) > GS(kt) > GS_BDS(kt)
+            def pick_speed(r):
+                if r is None:
+                    return None
+                for col in ['GS_TVP(kt)', 'GS(kt)', 'GS_BDS(kt)']:
+                    v = r.get(col)
+                    if pd.notna(v):
+                        try:
+                            return float(v)
+                        except Exception:
+                            continue
+                return None
+
+            # ADS-B point
+            if adsb_row is not None and pd.notna(adsb_row.get('LAT')) and pd.notna(adsb_row.get('LON')):
                 aircraft_data.append({
-                    'address': addr_str,
-                    'callsign': str(row.get('TI', '')) if pd.notna(row.get('TI')) else '',
-                    'lat': float(row['LAT']),
-                    'lon': float(row['LON']),
-                    'fl': float(row['FL']) if pd.notna(row.get('FL')) else None,
-                    'speed': float(row['GS(kt)']) if pd.notna(row.get('GS(kt)')) else None,
-                    'cat': int(row['CAT']) if pd.notna(row.get('CAT')) else 0,
-                    'both': addr_str in both_set
+                    'address': ta,
+                    'callsign': str(adsb_row.get('TI', '')) if pd.notna(adsb_row.get('TI')) else '',
+                    'lat': float(adsb_row['LAT']),
+                    'lon': float(adsb_row['LON']),
+                    'fl': float(adsb_row['FL']) if pd.notna(adsb_row.get('FL')) else None,
+                    'speed': pick_speed(adsb_row),
+                    'cat': 21,
+                    'both': ta in both_set
                 })
+
+            # RADAR point: if missing in this window but known historically, keep last position
+            if radar_row is not None and pd.notna(radar_row.get('LAT')) and pd.notna(radar_row.get('LON')):
+                aircraft_data.append({
+                    'address': ta,
+                    'callsign': str(radar_row.get('TI', '')) if pd.notna(radar_row.get('TI')) else '',
+                    'lat': float(radar_row['LAT']),
+                    'lon': float(radar_row['LON']),
+                    'fl': float(radar_row['FL']) if pd.notna(radar_row.get('FL')) else None,
+                    'speed': pick_speed(radar_row),
+                    'cat': 48,
+                    'both': ta in both_set
+                })
+            else:
+                last = self._last_radar_by_ta.get(ta)
+                if last is not None:
+                    aircraft_data.append({
+                        'address': ta,
+                        'callsign': str(adsb_row.get('TI', '')) if adsb_row is not None and pd.notna(adsb_row.get('TI')) else '',
+                        'lat': last['lat'],
+                        'lon': last['lon'],
+                        'fl': last['fl'],
+                        'speed': None,
+                        'cat': 48,
+                        'both': ta in both_set
+                    })
 
         if aircraft_data:
             adsb_count = sum(1 for a in aircraft_data if a['cat'] == 21)
             radar_count = sum(1 for a in aircraft_data if a['cat'] == 48)
-            both_count = sum(1 for a in aircraft_data if a['both'])
+            both_count = len([ta for ta in tas_seen if ta in both_set])
 
             self.aircraft_label.setText(
                 f"Aircraft: {len(aircraft_data)} (ADS-B: {adsb_count}, Radar: {radar_count}, Both: {both_count})")

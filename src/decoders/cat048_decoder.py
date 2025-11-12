@@ -691,57 +691,56 @@ class Cat048Decoder(AsterixDecoderBase):
         return result
 
     def _decode_bds_60(self, bds_data: bytes) -> dict:
-        """Decode BDS 6.0 - Heading and speed report"""
-        result = {}
+        res = {}
+        if not bds_data or len(bds_data) < 7:
+            return res
 
-        # Convert to 56-bit integer (bit 56 = MSB at shift position 55, bit 1 = LSB at position 0)
-        bds_value = int.from_bytes(bds_data, byteorder='big')
+        v = int.from_bytes(bds_data[:7], 'big')  # 56 bits total
 
-        # Magnetic Heading (bits 1-12: status + sign + 10 data)
-        mag_heading_status = (bds_value >> 55) & 0x01  # bit 56 (actual bit 1)
-        if mag_heading_status:
-            mag_heading_raw = (bds_value >> 45) & 0x07FF  # bits 55-45 (actual bits 2-12: sign + 10 data)
-            # Check sign bit (bit 55 = actual bit 2)
-            if mag_heading_raw & 0x0400:  # bit 10 of the 11-bit field
-                mag_heading_raw = mag_heading_raw - 0x0800  # Convert from 11-bit two's complement
-            mag_heading = mag_heading_raw * 90.0 / 512.0  # LSB = 90/512 degrees
-            result["MG_HDG_deg"] = mag_heading
+        # BDS 6.0 Magnetic Heading with two's-complement
+        mh_status = (v >> 55) & 0x01  # bit 56: STATUS
+        if mh_status:
+            # Extract 11-bit signed field: bit 55 (sign/MSB) + bits 54..45 (10 data bits)
+            mh_raw = (v >> 44) & 0x07FF  # bits 55..45: 11 bits total
 
-        # Indicated Airspeed (bits 13-23: status + 10 data)
-        ias_status = (bds_value >> 43) & 0x01  # bit 44 (actual bit 13)
+            # Apply two's complement for 11-bit signed value
+            if mh_raw & 0x0400:  # Check MSB of 11-bit field (bit 55 in the word)
+                mh_raw -= 0x0800  # Convert from 11-bit two's complement to signed int
+
+            # Scale by LSB = 90/512 degrees
+            mh = (mh_raw * 90.0) / 512.0
+
+            res['MG_HDG_deg'] = mh
+
+        # Indicated Airspeed
+        ias_status = (v >> 43) & 0x01  # bit 44
         if ias_status:
-            ias_raw = (bds_value >> 33) & 0x03FF  # bits 43-34 (actual bits 14-23: 10 data bits)
-            indicated_airspeed = ias_raw  # LSB = 1 knot
-            result["IAS_kt"] = indicated_airspeed
+            ias_raw = (v >> 33) & 0x03FF  # bits 43..34
+            res['IAS_kt'] = int(ias_raw)  # 1 kt LSB
 
-        # Mach Number (bits 24-34: status + 10 data)
-        mach_status = (bds_value >> 32) & 0x01  # bit 33 (actual bit 24)
+        # Mach number
+        mach_status = (v >> 32) & 0x01  # bit 33
         if mach_status:
-            mach_raw = (bds_value >> 22) & 0x03FF  # bits 32-23 (actual bits 25-34: 10 data bits)
-            mach_number = mach_raw * (2.048 / 512.0)  # LSB = 2.048/512 = 0.004
-            result["MACH"] = mach_number
+            mach_raw = (v >> 22) & 0x03FF  # bits 32..23
+            res['MACH'] = (mach_raw * 2.048) / 512.0
 
-        # Barometric Altitude Rate (bits 35-45: status + sign + 9 data)
-        baro_rate_status = (bds_value >> 21) & 0x01  # bit 22 (actual bit 35)
-        if baro_rate_status:
-            baro_rate_raw = (bds_value >> 11) & 0x03FF  # bits 21-12 (actual bits 36-45: sign + 9 data)
-            # Check sign bit (bit 21 = actual bit 36)
-            if baro_rate_raw & 0x0200:  # bit 9 of the 10-bit field
-                baro_rate_raw = baro_rate_raw - 0x0400  # Convert from 10-bit two's complement
-            baro_rate = baro_rate_raw * 32  # LSB = 32 ft/min
-            result["BAR_RATE_ft_min"] = baro_rate
+        # Barometric Altitude Rate (signed, 10-bit sign+magnitude, LSB=32)
+        bar_status = (v >> 21) & 0x01  # bit 22
+        if bar_status:
+            bar_raw = (v >> 11) & 0x03FF  # bits 21..12
+            if bar_raw & 0x0200:  # sign bit
+                bar_raw -= 0x0400
+            res['BAR_RATE_ft_min'] = int(bar_raw) * 32
 
-        # Inertial Vertical Velocity (bits 46-56: status + sign + 9 data)
-        ivv_status = (bds_value >> 10) & 0x01  # bit 11 (actual bit 46)
+        # Inertial Vertical Velocity (signed, 10-bit sign+magnitude, LSB=32)
+        ivv_status = (v >> 10) & 0x01  # bit 11
         if ivv_status:
-            ivv_raw = (bds_value >> 0) & 0x03FF  # bits 10-1 (actual bits 47-56: sign + 9 data)
-            # Check sign bit (bit 10 = actual bit 47)
-            if ivv_raw & 0x0200:  # bit 9 of the 10-bit field
-                ivv_raw = ivv_raw - 0x0400  # Convert from 10-bit two's complement
-            inertial_vv = ivv_raw * 32  # LSB = 32 ft/min
-            result["IVV_ft_min"] = inertial_vv
+            ivv_raw = v & 0x03FF  # bits 10..1
+            if ivv_raw & 0x0200:
+                ivv_raw -= 0x0400
+            res['IVV_ft_min'] = int(ivv_raw) * 32
 
-        return result
+        return res
 
     def _decode_track_number(self, pos: int, record: Record) -> int:
         """I048/161 - Track Number (2 bytes fixed)

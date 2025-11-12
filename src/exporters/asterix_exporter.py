@@ -45,7 +45,8 @@ class AsterixExporter:
         # BDS 5.0 - Track and Turn Report
         'RA',  # Roll Angle (deg)
         'TTA',  # True Track Angle (deg)
-        'GS(kt)',  # Ground Speed (kt)
+        'GS_TVP(kt)',  # Ground Speed from TRACK_VELOCITY_POLAR (radar)
+        'GS_BDS(kt)',  # Ground Speed from BDS 5.0 (aircraft)
         'TAR',  # Track Angle Rate (deg/s)
         'TAS',  # True Airspeed (kt)
 
@@ -60,6 +61,8 @@ class AsterixExporter:
         # Track/Status
         'TN',  # Track Number
 
+        'TST',  # Test Target
+
         # Detection/Quality fields
         'TYP',  # Detection type (PSR/SSR/Mode S/CMB)
         'SIM',  # Simulated target indicator (0/1)
@@ -73,7 +76,6 @@ class AsterixExporter:
         'RC',  # Range Check
         'DCR',  # Differential Correction
         'GBS',  # Ground Bit Set
-        'TST',  # Test Target
 
         'STAT_code',  # Status code - COM/ACAS
         'STAT',  # Status description - COM/ACAS
@@ -115,7 +117,7 @@ class AsterixExporter:
             return df
 
         int_cols = [
-            'CAT', 'SAC', 'SIC', 'RDP', 'TYP', 'SIM', 'SPI', 'RAB', 'TST', 'STAT_code',
+            'CAT', 'SAC', 'SIC', 'RDP', 'TYP', 'SIM','TST', 'SPI', 'RAB', 'TST', 'STAT_code',
             'ATP', 'ARC', 'RC', 'DCR', 'GBS', 'TN', 'TAS', 'IAS', 'BAR', 'IVV'
         ]
         for col in int_cols:
@@ -127,7 +129,7 @@ class AsterixExporter:
 
         float_cols = [
             'LAT', 'LON', 'RHO', 'THETA', 'H(m)', 'H(ft)', 'H_WGS84',
-            'GS(kt)', 'HDG', 'MG_HDG', 'TTA', 'RA', 'TAR', 'MACH',
+            'GS_TVP(kt)', 'GS_BDS(kt)', 'HDG', 'MG_HDG', 'TTA', 'RA', 'TAR', 'MACH',
             'BP', 'FL', 'Time_sec'
         ]
         for col in float_cols:
@@ -261,7 +263,7 @@ class AsterixExporter:
                 row['TN'] = value.get('TN')
 
             elif item_type == CAT048ItemType.TRACK_VELOCITY_POLAR:
-                row['GS(kt)'] = value.get('GS_kt')
+                row['GS_TVP(kt)'] = value.get('GS_kt')
                 row['HDG'] = value.get('HDG_degrees')
 
             elif item_type == CAT048ItemType.COMMUNICATIONS_ACAS:
@@ -274,6 +276,7 @@ class AsterixExporter:
                 row['RDP'] = value.get('RDP')
                 row['SPI'] = value.get('SPI')
                 row['RAB'] = value.get('RAB')
+                row['TST'] = value.get('RAB')
 
             elif item_type == CAT048ItemType.MODE_S_MB_DATA:
                 bds_registers = value.get('bds_registers', [])
@@ -295,8 +298,7 @@ class AsterixExporter:
                         row['TTA'] = bds_reg['TTA_deg']
 
                     if 'GS_kt' in bds_reg:
-                        if row.get('GS(kt)') is None:
-                            row['GS(kt)'] = bds_reg['GS_kt']
+                        row['GS_BDS(kt)'] = bds_reg['GS_kt']
 
                     if 'TAR_deg_s' in bds_reg:
                         row['TAR'] = bds_reg['TAR_deg_s']
@@ -349,7 +351,6 @@ class AsterixExporter:
             'TN': 'Track Number',
             'ModeS': 'BDS registers present',
             'BP': 'Barometric Pressure Setting (hPa)',
-            'GS(kt)': 'Ground Speed (knots, radar or BDS 5.0)',
             'HDG': 'Heading (degrees, TRACK_VELOCITY_POLAR)',
             'MG_HDG': 'Magnetic Heading (degrees, BDS 6.0)',
             'TTA': 'True Track Angle (degrees, BDS 5.0)',
@@ -360,6 +361,8 @@ class AsterixExporter:
             'MACH': 'Mach Number (BDS 6.0)',
             'BAR': 'Barometric Altitude Rate (ft/min, BDS 6.0)',
             'IVV': 'Inertial Vertical Velocity (ft/min, BDS 6.0)',
+            'GS_TVP(kt)': 'Ground Speed (knots) from CAT048 TRACK_VELOCITY_POLAR (radar)',
+            'GS_BDS(kt)': 'Ground Speed (knots) from Mode S BDS 5.0 (aircraft)',
             'STAT': 'Communications/ACAS status description',
             'STAT_code': 'Communications/ACAS status code',
             'TYP': 'Detection type (PSR/SSR/Mode S/CMB)',
