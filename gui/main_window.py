@@ -218,6 +218,12 @@ class AsterixGUI(QMainWindow):
         self.white_noise_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.white_noise_check)
 
+        # NEW: Fixed transponder filter
+        self.fixed_transponder_check = QCheckBox("Remove Fixed Transponders (7777)")
+        self.fixed_transponder_check.setChecked(True)
+        self.fixed_transponder_check.stateChanged.connect(self.on_filter_changed)
+        layout.addWidget(self.fixed_transponder_check)
+
         group.setLayout(layout)
         return group
 
@@ -407,7 +413,11 @@ class AsterixGUI(QMainWindow):
             if self.white_noise_check.isChecked():
                 df = AsterixFilter.filter_white_noise(df)
 
-            # 3. ALTITUDE FILTER
+            # 3. FIXED TRANSPONDER FILTER (NEW)
+            if self.fixed_transponder_check.isChecked():
+                df = AsterixFilter.filter_fixed_transponders(df)
+
+            # 4. ALTITUDE FILTER
             min_fl = self.min_fl_spin.value()
             max_fl = self.max_fl_spin.value()
             if min_fl > 0 or max_fl < 600:
@@ -417,25 +427,25 @@ class AsterixGUI(QMainWindow):
                     max_fl=max_fl if max_fl < 600 else None
                 )
 
-            # 4. AIRBORNE FILTER
+            # 5. AIRBORNE FILTER
             if self.airborne_check.isChecked():
                 df = AsterixFilter.filter_airborne(df)
 
-            # 5. ON GROUND FILTER
+            # 6. ON GROUND FILTER
             if self.ground_check.isChecked():
                 df = AsterixFilter.filter_on_ground(df)
 
-            # 6. CALLSIGN FILTER (simplified: single pattern only)
+            # 7. CALLSIGN FILTER (simplified: single pattern only)
             callsign_text = self.callsign_input.text().strip()
             if callsign_text and 'TI' in df.columns:
                 df = AsterixFilter.filter_by_callsign(df, callsign_text)
 
-            # 7. SPEED FILTER
+            # 8. SPEED FILTER
             min_speed = self.min_speed_spin.value()
             if min_speed > 0:
                 df = AsterixFilter.filter_by_speed(df, min_speed=min_speed)
 
-            # 8. GEOGRAPHIC FILTER
+            # 9. GEOGRAPHIC FILTER
             if self.geo_filter_check.isChecked():
                 df = AsterixFilter.filter_by_geographic_bounds(df)
 
@@ -466,6 +476,7 @@ class AsterixGUI(QMainWindow):
         self.cat021_check.setChecked(True)
         self.cat048_check.setChecked(True)
         self.white_noise_check.setChecked(True)
+        self.fixed_transponder_check.setChecked(True)  # NEW
         self.min_fl_spin.setValue(0)
         self.max_fl_spin.setValue(600)
         self.airborne_check.setChecked(False)

@@ -80,6 +80,31 @@ class AsterixFilter:
         return result.reset_index(drop=True)
 
     @staticmethod
+    def filter_fixed_transponders(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter out fixed test transponders (RABMs - Radar Beacon Monitoring).
+        Removes records where:
+        - Mode3/A code equals '7777' (fixed test transponder code)
+        - TI (callsign) starts with '7777'
+
+        These are ground-based transponders used to check radar station correctness.
+        """
+        if 'Mode3/A' not in df.columns and 'TI' not in df.columns:
+            return df
+
+        mask = pd.Series(True, index=df.index)
+
+        # Filter out Mode3/A code 7777
+        if 'Mode3/A' in df.columns:
+            mask = mask & (df['Mode3/A'] != '7777')
+
+        # Filter out TI starting with 7777
+        if 'TI' in df.columns:
+            mask = mask & (~df['TI'].astype(str).str.startswith('7777', na=False))
+
+        return df[mask].reset_index(drop=True)
+
+    @staticmethod
     def filter_by_callsign(df: pd.DataFrame, pattern: str) -> pd.DataFrame:
         """Filter by callsign pattern (e.g., 'RYR' for Ryanair)"""
         if 'TI' not in df.columns:
