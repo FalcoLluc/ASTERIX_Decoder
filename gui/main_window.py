@@ -10,6 +10,8 @@ import pandas as pd
 import numpy as np
 import sys
 
+from multiprocessing import Pool, cpu_count
+
 from gui.pandas_model import PandasModel
 from gui.map_widget import MapWidget
 from src.decoders.asterix_file_reader import AsterixFileReader
@@ -38,57 +40,72 @@ CAT048_COLUMNS = [
     'STAT_code', 'STAT',
 ]
 
+
 # ============================================================
-# BACKGROUND THREAD
+# WORKER FUNCTION (must be at module level for pickling)
+# ============================================================
+def process_records_chunk(records_chunk):
+    """
+    Worker function to decode a chunk of records in parallel.
+    Must be at module level for multiprocessing.
+    """
+    from src.utils.handlers import decode_records
+    from src.exporters.asterix_exporter import AsterixExporter
+
+    try:
+        # Decode records
+        decoded = decode_records(records_chunk)
+
+        # Convert to DataFrame
+        df_chunk = AsterixExporter.records_to_dataframe(decoded, apply_qnh=True)
+
+        return df_chunk
+    except Exception as e:
+        import traceback
+        print(f"Error in worker: {e}\n{traceback.format_exc()}")
+        return pd.DataFrame()
+
+
+# ============================================================
+# BACKGROUND THREAD WITH MULTIPROCESSING
 # ============================================================
 class ProcessingThread(QThread):
-    """Thread to read, decode, and export ASTERIX files (unified)."""
+    """Thread to read, decode, and export ASTERIX files with parallel processing."""
     finished = Signal(pd.DataFrame)
     error = Signal(str)
     progress = Signal(int, str)
 
-    def __init__(self, file_path):
+    def __init__(self, file_path, use_multiprocessing=True):
         super().__init__()
         self.file_path = file_path
+        self.use_multiprocessing = use_multiprocessing
+
+        # Adaptive core selection
+        total_cores = cpu_count()
+        if total_cores <= 2:
+            self.n_workers = 1  # Single-core systems
+        elif total_cores <= 4:
+            self.n_workers = total_cores - 1  # Small systems: leave 1 free
+        else:
+            self.n_workers = total_cores - 2  # Large systems: leave 2 free
 
     def run(self):
         try:
-            # PHASE 1: Fast count (no decoding) - takes 2-5 seconds
+            # PHASE 1: Fast count (no decoding)
             self.progress.emit(5, "Counting records...")
             reader_count = AsterixFileReader(self.file_path)
-            total_records = sum(1 for _ in reader_count.read_records())  # Fast!
+            total_records = sum(1 for _ in reader_count.read_records())
 
-            # PHASE 2: Decode with progress - takes 30-60 seconds
-            self.progress.emit(10, "Processing records...")
-            reader_decode = AsterixFileReader(self.file_path)  # Fresh reader!
+            # PHASE 2: Read all records (fast, no decoding yet)
+            self.progress.emit(10, "Reading records...")
+            reader_decode = AsterixFileReader(self.file_path)
+            all_records = list(reader_decode.read_records())
 
-            BATCH_SIZE = 50000
-            all_dfs = []
-            batch = []
-            total_processed = 0
-
-            for record in decode_records_iter(reader_decode.read_records()):
-                batch.append(record)
-
-                if len(batch) >= BATCH_SIZE:
-                    df_batch = AsterixExporter.records_to_dataframe(batch)
-                    all_dfs.append(df_batch)
-
-                    total_processed += len(batch)
-                    progress_pct = 10 + int((total_processed / total_records) * 70)
-                    self.progress.emit(progress_pct, f"Processed {total_processed:,} / {total_records:,} records...")
-
-                    batch = []
-
-            # Process remaining records
-            if batch:
-                df_batch = AsterixExporter.records_to_dataframe(batch)
-                all_dfs.append(df_batch)
-                total_processed += len(batch)
-
-            # Concatenate all batches
-            self.progress.emit(90, "Merging batches...")
-            df_raw = pd.concat(all_dfs, ignore_index=True)
+            # PHASE 3: Decode with multiprocessing
+            if self.use_multiprocessing and self.n_workers > 1:
+                df_raw = self._process_parallel(all_records, total_records)
+            else:
+                df_raw = self._process_sequential(all_records, total_records)
 
             self.progress.emit(100, "Complete!")
             self.finished.emit(df_raw)
@@ -97,6 +114,54 @@ class ProcessingThread(QThread):
             import traceback
             self.error.emit(f"{str(e)}\n\n{traceback.format_exc()}")
 
+    def _process_sequential(self, all_records, total_records):
+        """Sequential processing (fallback)."""
+        self.progress.emit(15, "Processing records (single-core)...")
+
+        BATCH_SIZE = 50000
+        all_dfs = []
+        total_processed = 0
+
+        for i in range(0, len(all_records), BATCH_SIZE):
+            batch = all_records[i:i + BATCH_SIZE]
+            df_batch = process_records_chunk(batch)
+            all_dfs.append(df_batch)
+
+            total_processed += len(batch)
+            progress_pct = 15 + int((total_processed / total_records) * 75)
+            self.progress.emit(progress_pct, f"Processed {total_processed:,} / {total_records:,} records...")
+
+        self.progress.emit(90, "Merging results...")
+        return pd.concat(all_dfs, ignore_index=True)
+
+    def _process_parallel(self, all_records, total_records):
+        """Parallel processing with multiprocessing."""
+        self.progress.emit(15, f"Processing records ({self.n_workers} cores)...")
+
+        # Split records into chunks for parallel processing
+        chunk_size = max(10000, len(all_records) // (self.n_workers * 4))
+        chunks = [all_records[i:i + chunk_size]
+                  for i in range(0, len(all_records), chunk_size)]
+
+        all_dfs = []
+        total_processed = 0
+
+        # Process chunks in parallel
+        with Pool(processes=self.n_workers) as pool:
+            # Use imap_unordered for progress tracking
+            for df_chunk in pool.imap_unordered(process_records_chunk, chunks):
+                if not df_chunk.empty:
+                    all_dfs.append(df_chunk)
+
+                total_processed += chunk_size
+                progress_pct = 15 + min(int((total_processed / total_records) * 75), 75)
+                self.progress.emit(
+                    progress_pct,
+                    f"Processed {min(total_processed, total_records):,} / {total_records:,} records..."
+                )
+
+        self.progress.emit(90, "Merging results...")
+        return pd.concat(all_dfs, ignore_index=True)
 
 # ============================================================
 # MAIN WINDOW
