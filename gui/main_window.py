@@ -8,16 +8,12 @@ from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer
 from PySide6.QtGui import QAction
 import pandas as pd
 import numpy as np
-import sys
-
 from multiprocessing import Pool, cpu_count
-
 from gui.pandas_model import PandasModel
 from gui.map_widget import MapWidget
 from src.decoders.asterix_file_reader import AsterixFileReader
 from src.exporters.asterix_exporter import AsterixExporter
 from src.utils.asterix_filter import AsterixFilter
-from src.utils.handlers import decode_records, decode_records_iter
 
 # ============================================================
 # COLUMN DEFINITIONS FOR EACH CATEGORY
@@ -642,11 +638,24 @@ class AsterixGUI(QMainWindow):
 # ============================================================
 # Entry point
 # ============================================================
+# ============================================================
+# Entry point
+# ============================================================
 if __name__ == '__main__':
+    import multiprocessing
+    import sys
     from PySide6.QtWidgets import QApplication
 
+    # Set multiprocessing start method (must be inside __main__)
+    multiprocessing.set_start_method('spawn', force=True)
+
+    # Required for frozen executables (PyInstaller)
+    multiprocessing.freeze_support()
+
+    # Create and run application
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     window = AsterixGUI()
     window.show()
     sys.exit(app.exec())
+
