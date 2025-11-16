@@ -124,43 +124,36 @@ class AsterixExporter:
 
     @staticmethod
     def _downcast_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+        """OPTIMIZED: Single-pass dtype optimization."""
         if df is None or df.empty:
             return df
 
-        int_cols = [
-            'CAT', 'SAC', 'SIC', 'RDP', 'TYP', 'SIM','TST', 'SPI', 'RAB', 'TST', 'STAT_code',
-            'ATP', 'ARC', 'RC', 'DCR', 'GBS', 'TN', 'TAS', 'IAS', 'BAR', 'IVV'
-        ]
-        for col in int_cols:
+        # Define all dtypes at once
+        dtype_map = {
+            # Integers
+            **{col: 'Int64' for col in ['CAT', 'SAC', 'SIC', 'RDP', 'TYP', 'SIM', 'TST',
+                                        'SPI', 'RAB', 'STAT_code', 'ATP', 'ARC', 'RC',
+                                        'DCR', 'GBS', 'TN', 'TAS', 'IAS', 'BAR', 'IVV']},
+            # Floats
+            **{col: 'float32' for col in ['LAT', 'LON', 'RHO', 'THETA', 'H(m)', 'H(ft)',
+                                          'H_WGS84', 'GS_TVP(kt)', 'GS_BDS(kt)', 'HDG',
+                                          'MG_HDG', 'TTA', 'RA', 'TAR', 'MACH', 'BP',
+                                          'FL', 'Time_sec']},
+            # Categories
+            'TA': 'category',
+            'TI': 'category'
+        }
+
+        # Apply in single pass
+        for col, dtype in dtype_map.items():
             if col in df.columns:
                 try:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+                    if dtype in ['Int64', 'float32']:
+                        df[col] = pd.to_numeric(df[col], errors='coerce').astype(dtype)
+                    else:
+                        df[col] = df[col].astype(dtype)
                 except (ValueError, TypeError):
                     pass
-
-        float_cols = [
-            'LAT', 'LON', 'RHO', 'THETA', 'H(m)', 'H(ft)', 'H_WGS84',
-            'GS_TVP(kt)', 'GS_BDS(kt)', 'HDG', 'MG_HDG', 'TTA', 'RA', 'TAR', 'MACH',
-            'BP', 'FL', 'Time_sec'
-        ]
-        for col in float_cols:
-            if col in df.columns:
-                try:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
-                except (ValueError, TypeError):
-                    pass
-
-        if 'TA' in df.columns and df['TA'].notna().any():
-            try:
-                df['TA'] = df['TA'].astype('category')
-            except (ValueError, TypeError):
-                pass
-
-        if 'TI' in df.columns and df['TI'].notna().any():
-            try:
-                df['TI'] = df['TI'].astype('category')
-            except (ValueError, TypeError):
-                pass
 
         return df
 
@@ -169,26 +162,29 @@ class AsterixExporter:
         if 'FL' not in df.columns or 'TA' not in df.columns:
             return df
 
-        corrector = QNHCorrector()
-        alt_ft_list = []
-        alt_m_list = []
+        # Initialize result columns with NaN
+        df['H(ft)'] = np.nan
+        df['H(m)'] = np.nan
 
-        for _, row in df.iterrows():
-            ta = row.get('TA')
-            fl = row.get('FL')
-            bp = row.get('BP')
+        # Vectorized: Get all altitudes in feet
+        alt_ft = df['FL'].fillna(0) * 100.0
 
-            corrected_alt_ft = corrector.correct(ta, fl, bp)
+        # Filter: Only process records below transition altitude
+        below_ta_mask = alt_ft < 6000.0
 
-            if corrected_alt_ft is not None:
-                alt_ft_list.append(corrected_alt_ft)
-                alt_m_list.append(corrected_alt_ft * 0.3048)
-            else:
-                alt_ft_list.append(None)
-                alt_m_list.append(None)
+        if not below_ta_mask.any():
+            return df
 
-        df['H(ft)'] = alt_ft_list
-        df['H(m)'] = alt_m_list
+        # Get BP values, use standard QNH if missing
+        bp = df.loc[below_ta_mask, 'BP'].fillna(1013.25)
+
+        # Vectorized correction calculation
+        correction_ft = (bp - 1013.25) * 30.0
+        corrected_alt = alt_ft[below_ta_mask] + correction_ft
+
+        # Assign results
+        df.loc[below_ta_mask, 'H(ft)'] = corrected_alt
+        df.loc[below_ta_mask, 'H(m)'] = corrected_alt * 0.3048
 
         return df
 

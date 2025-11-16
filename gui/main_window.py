@@ -53,13 +53,42 @@ class ProcessingThread(QThread):
 
     def run(self):
         try:
-            self.progress.emit(10, "Reading and decoding records…")
-            reader = AsterixFileReader(self.file_path)
-            # Lazy decode to avoid materializing the entire records list in memory
-            records_iter = decode_records_iter(reader.read_records())
+            # PHASE 1: Fast count (no decoding) - takes 2-5 seconds
+            self.progress.emit(5, "Counting records...")
+            reader_count = AsterixFileReader(self.file_path)
+            total_records = sum(1 for _ in reader_count.read_records())  # Fast!
 
-            self.progress.emit(60, "Exporting to DataFrame…")
-            df_raw = AsterixExporter.records_to_dataframe(records_iter)
+            # PHASE 2: Decode with progress - takes 30-60 seconds
+            self.progress.emit(10, "Processing records...")
+            reader_decode = AsterixFileReader(self.file_path)  # Fresh reader!
+
+            BATCH_SIZE = 50000
+            all_dfs = []
+            batch = []
+            total_processed = 0
+
+            for record in decode_records_iter(reader_decode.read_records()):
+                batch.append(record)
+
+                if len(batch) >= BATCH_SIZE:
+                    df_batch = AsterixExporter.records_to_dataframe(batch)
+                    all_dfs.append(df_batch)
+
+                    total_processed += len(batch)
+                    progress_pct = 10 + int((total_processed / total_records) * 70)
+                    self.progress.emit(progress_pct, f"Processed {total_processed:,} / {total_records:,} records...")
+
+                    batch = []
+
+            # Process remaining records
+            if batch:
+                df_batch = AsterixExporter.records_to_dataframe(batch)
+                all_dfs.append(df_batch)
+                total_processed += len(batch)
+
+            # Concatenate all batches
+            self.progress.emit(90, "Merging batches...")
+            df_raw = pd.concat(all_dfs, ignore_index=True)
 
             self.progress.emit(100, "Complete!")
             self.finished.emit(df_raw)
@@ -494,7 +523,9 @@ class AsterixGUI(QMainWindow):
             print("⚠️ No data to display on map")
             return
 
-        map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'GS_TVP(kt)', 'GS_BDS(kt)']
+        # ✅ FIXED: Added H(ft), Mode3/A, and GS(kt)
+        map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'H(ft)',
+                       'Mode3/A', 'GS(kt)', 'GS_TVP(kt)', 'GS_BDS(kt)']
         available_cols = [col for col in map_columns if col in self.df_display.columns]
 
         if len(available_cols) < 3:

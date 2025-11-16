@@ -211,12 +211,6 @@ class MapWidget(QWidget):
                 return (bearing + 360) % 360;
             }
 
-            // Format altitude with TA/TL logic: show altitude below TA, FL above TL
-            function formatAltitude(alt_str) {
-                // alt_str viene ya procesado desde Python
-                return alt_str || 'N/A';
-            }
-
             // Update aircraft positions and trails
             window.updateAircraft = function(data) {
                 // Clear old markers
@@ -246,12 +240,14 @@ class MapWidget(QWidget):
                         iconAnchor: [13, 13] 
                     });
 
-                    var altitudeStr = formatAltitude(aircraft.altitude_display);
+                    var altitudeStr = aircraft.altitude_display || 'N/A';
+                    var mode3aStr = aircraft.mode3a || 'N/A';
 
                     // Add marker with popup
                     var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500})
                         .bindPopup('<b>' + (aircraft.callsign || aircraft.address) + '</b><br>' +
                                    '<strong>Source:</strong> ' + srcText + '<br>' +
+                                   '<strong>Mode3/A:</strong> ' + mode3aStr + '<br>' +
                                    '<strong>Altitude:</strong> ' + altitudeStr + '<br>' +
                                    '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
                                    '<strong>Heading:</strong> ' + Math.round(rotation) + '°');
@@ -485,22 +481,19 @@ class MapWidget(QWidget):
                 return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255), 120];
             }
 
-            // Format altitude - received pre-formatted from Python
-            function formatAltitude(alt_str) {
-                return alt_str || 'N/A';
-            }
-
             // Handle aircraft click
             function handleClick(info) {
                 if (info.layer && info.layer.id === 'aircraft-layer' && info.object) {
                     const aircraft = info.object;
                     const catText = aircraft.cat === 21 ? 'ADS-B (CAT021)' : (aircraft.cat === 48 ? 'Radar (CAT048)' : 'Unknown');
-                    const altitudeStr = formatAltitude(aircraft.altitude_display);
+                    const altitudeStr = aircraft.altitude_display || 'N/A';
+                    const mode3aStr = aircraft.mode3a || 'N/A';
 
                     const html = `
                         <b>${aircraft.callsign || aircraft.address}</b><br>
                         <strong>Address:</strong> ${aircraft.address}<br>
                         <strong>CAT:</strong> ${catText}<br>
+                        <strong>Mode3/A:</strong> ${mode3aStr}<br>
                         <strong>Altitude:</strong> ${altitudeStr}<br>
                         <strong>Speed:</strong> ${aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A'} kt
                     `;
@@ -638,9 +631,9 @@ class MapWidget(QWidget):
             self.time_slider.setEnabled(False)
             return
 
-        # Select required columns
-        needed = [c for c in ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'H(m)', 'H(ft)',
-                              'GS(kt)', 'GS_TVP(kt)', 'GS_BDS(kt)'] if c in df.columns]
+        # Select required columns (removed H(m), added Mode3/A)
+        needed = [c for c in ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'H(ft)',
+                              'Mode3/A', 'GS(kt)', 'GS_TVP(kt)', 'GS_BDS(kt)'] if c in df.columns]
         self.df = df[needed].dropna(subset=['LAT', 'LON', 'Time_sec']).sort_values('Time_sec')
 
         # Filter only CAT021 and CAT048
@@ -771,43 +764,34 @@ class MapWidget(QWidget):
             self.time_slider.setValue(int(self.current_time))
             self.time_slider.blockSignals(False)
 
-    def _format_altitude_display(self, fl, alt_m, alt_ft):
+    def _format_altitude_display(self, fl, alt_ft):
         """
-        Format altitude according to TA/TL rules:
-        - Below TA (13,000 ft): show altitude in feet or meters
-        - Above TL (FL140): show Flight Level
+        ✅ ULTRA-SIMPLIFIED: If H(ft) exists, show it; otherwise show FL.
+        Backend guarantees H(ft) only contains QNH-corrected values when set.
         """
-        TRANSITION_ALTITUDE_FT = 13000
-        TRANSITION_LEVEL_FL = 140
-
-        # Priority 1: If FL >= TL, show FL
-        if pd.notna(fl) and fl >= TRANSITION_LEVEL_FL:
-            return f"FL{int(round(fl))}"
-
-        # Priority 2: Check altitude in feet
         if pd.notna(alt_ft):
-            if alt_ft < TRANSITION_ALTITUDE_FT:
-                return f"{int(round(alt_ft))} ft"
-            elif pd.notna(fl):
-                return f"FL{int(round(fl))}"
-            else:
-                return f"{int(round(alt_ft))} ft"
+            return f"{int(round(alt_ft))} ft"
 
-        # Priority 3: Check altitude in meters
-        if pd.notna(alt_m):
-            alt_ft_converted = alt_m * 3.28084
-            if alt_ft_converted < TRANSITION_ALTITUDE_FT:
-                return f"{int(round(alt_m))} m"
-            elif pd.notna(fl):
-                return f"FL{int(round(fl))}"
-            else:
-                return f"{int(round(alt_m))} m"
-
-        # Fallback: if only FL available
         if pd.notna(fl):
             return f"FL{int(round(fl))}"
 
         return "N/A"
+
+    def _get_callsign(self, adsb_row, radar_row):
+        """Safely get callsign from either source."""
+        if adsb_row is not None and pd.notna(adsb_row.get('TI')):
+            return str(adsb_row['TI'])
+        if radar_row is not None and pd.notna(radar_row.get('TI')):
+            return str(radar_row['TI'])
+        return ''
+
+    def _get_mode3a(self, adsb_row, radar_row):
+        """Safely get Mode3/A from either source."""
+        if adsb_row is not None and pd.notna(adsb_row.get('Mode3/A')):
+            return str(adsb_row['Mode3/A'])
+        if radar_row is not None and pd.notna(radar_row.get('Mode3/A')):
+            return str(radar_row['Mode3/A'])
+        return None
 
     def update_aircraft_positions(self):
         """Update aircraft markers and trajectories based on current time."""
@@ -859,77 +843,77 @@ class MapWidget(QWidget):
             adsb_row = latest_by_ta_cat.get((ta, 21))
             radar_row = latest_by_ta_cat.get((ta, 48))
 
+            callsign = self._get_callsign(adsb_row, radar_row)
+            mode3a = self._get_mode3a(adsb_row, radar_row)
+
             # Update last known radar position
             if radar_row is not None and pd.notna(radar_row.get('LAT')) and pd.notna(radar_row.get('LON')):
                 self._last_radar_by_ta[ta] = {
                     'lat': float(radar_row['LAT']),
                     'lon': float(radar_row['LON']),
                     'fl': float(radar_row['FL']) if pd.notna(radar_row.get('FL')) else None,
-                    'alt_m': float(radar_row['H(m)']) if pd.notna(radar_row.get('H(m)')) else None,
                     'alt_ft': float(radar_row['H(ft)']) if pd.notna(radar_row.get('H(ft)')) else None,
-                    'time': float(radar_row['Time_sec'])
+                    'time': float(radar_row['Time_sec']),
+                    'mode3a': mode3a
                 }
 
             # Add ADS-B detection if filter allows
             if self.source_filter in ["both", "adsb"]:
                 if adsb_row is not None and pd.notna(adsb_row.get('LAT')) and pd.notna(adsb_row.get('LON')):
-                    # Format altitude using TA/TL logic
                     altitude_display = self._format_altitude_display(
                         adsb_row.get('FL'),
-                        adsb_row.get('H(m)'),
                         adsb_row.get('H(ft)')
                     )
 
                     aircraft_data.append({
                         'address': ta,
-                        'callsign': str(adsb_row.get('TI', '')) if pd.notna(adsb_row.get('TI')) else '',
+                        'callsign': callsign,
                         'lat': float(adsb_row['LAT']),
                         'lon': float(adsb_row['LON']),
                         'fl': float(adsb_row['FL']) if pd.notna(adsb_row.get('FL')) else None,
                         'altitude_display': altitude_display,
                         'speed': pick_speed(adsb_row),
+                        'mode3a': mode3a,
                         'cat': 21
                     })
 
             # Add Radar detection if filter allows
             if self.source_filter in ["both", "radar"]:
                 if radar_row is not None and pd.notna(radar_row.get('LAT')) and pd.notna(radar_row.get('LON')):
-                    # Format altitude using TA/TL logic
                     altitude_display = self._format_altitude_display(
                         radar_row.get('FL'),
-                        radar_row.get('H(m)'),
                         radar_row.get('H(ft)')
                     )
 
                     aircraft_data.append({
                         'address': ta,
-                        'callsign': str(radar_row.get('TI', '')) if pd.notna(radar_row.get('TI')) else '',
+                        'callsign': callsign,
                         'lat': float(radar_row['LAT']),
                         'lon': float(radar_row['LON']),
                         'fl': float(radar_row['FL']) if pd.notna(radar_row.get('FL')) else None,
                         'altitude_display': altitude_display,
                         'speed': pick_speed(radar_row),
+                        'mode3a': mode3a,
                         'cat': 48
                     })
                 else:
-                    # Use last known radar position if current data missing
+                    # Use last known radar position
                     last = self._last_radar_by_ta.get(ta)
                     if last is not None:
                         altitude_display = self._format_altitude_display(
                             last.get('fl'),
-                            last.get('alt_m'),
                             last.get('alt_ft')
                         )
 
                         aircraft_data.append({
                             'address': ta,
-                            'callsign': str(adsb_row.get('TI', '')) if adsb_row is not None and pd.notna(
-                                adsb_row.get('TI')) else '',
+                            'callsign': callsign,
                             'lat': last['lat'],
                             'lon': last['lon'],
                             'fl': last.get('fl'),
                             'altitude_display': altitude_display,
                             'speed': None,
+                            'mode3a': last.get('mode3a'),
                             'cat': 48
                         })
 
