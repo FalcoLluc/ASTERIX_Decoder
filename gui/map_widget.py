@@ -1,6 +1,6 @@
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel, QComboBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel, QComboBox, QCheckBox
 from PySide6.QtGui import QShortcut, QKeySequence
 import pandas as pd
 import json
@@ -22,6 +22,8 @@ class MapWidget(QWidget):
         self.is_3d_mode = False
         self.source_filter = "both"
         self._last_valid_rotation = {}
+        self.show_labels = False
+        self.show_heatmap = False
 
         self.init_ui()
 
@@ -53,6 +55,16 @@ class MapWidget(QWidget):
         self.source_combo.addItems(["Both", "ADS-B Only", "Radar Only"])
         self.source_combo.currentIndexChanged.connect(self.on_source_filter_changed)
         control_layout.addWidget(self.source_combo)
+
+        self.labels_check = QCheckBox("Show Labels")
+        self.labels_check.setChecked(False)
+        self.labels_check.stateChanged.connect(self.toggle_labels)
+        control_layout.addWidget(self.labels_check)
+
+        self.heatmap_check = QCheckBox("Heat Map")
+        self.heatmap_check.setChecked(False)
+        self.heatmap_check.stateChanged.connect(self.toggle_heatmap)
+        control_layout.addWidget(self.heatmap_check)
 
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.clicked.connect(self.toggle_play)
@@ -112,6 +124,38 @@ class MapWidget(QWidget):
 
         self.load_base_map()
 
+    def toggle_labels(self, state):
+        """Toggle aircraft labels on/off."""
+        self.show_labels = (state == Qt.CheckState.Checked.value)
+        if self.df is not None:
+            self.update_aircraft_positions()
+
+    def toggle_heatmap(self, state):
+        """Toggle heatmap on/off."""
+        self.show_heatmap = (state == Qt.CheckState.Checked.value)
+        if self.show_heatmap and self.df is not None:
+            self.generate_heatmap()
+        else:
+            self.web_view.page().runJavaScript(
+                "if (window.heatLayer) { map.removeLayer(window.heatLayer); window.heatLayer = null; }")
+
+    def generate_heatmap(self):
+        """Generate heatmap from all trajectory data."""
+        if self.df is None or self.df.empty:
+            return
+
+        heatmap_data = []
+        for _, row in self.df.iterrows():
+            if pd.notna(row.get('LAT')) and pd.notna(row.get('LON')):
+                heatmap_data.append([float(row['LAT']), float(row['LON']), 0.5])
+
+        if len(heatmap_data) > 10000:
+            step = len(heatmap_data) // 10000
+            heatmap_data = heatmap_data[::step]
+
+        js_code = f"addHeatmap({json.dumps(heatmap_data)});"
+        self.web_view.page().runJavaScript(js_code)
+
     def on_source_filter_changed(self, index):
         """Handle source filter selection change."""
         filters = ["both", "adsb", "radar"]
@@ -125,12 +169,16 @@ class MapWidget(QWidget):
         self.is_3d_mode = not self.is_3d_mode
         if self.is_3d_mode:
             self.view_mode_btn.setText("🗺️ Vista 2D")
+            self.heatmap_check.setEnabled(False)
             self.load_3d_map()
         else:
             self.view_mode_btn.setText("🌐 Vista 3D")
+            self.heatmap_check.setEnabled(True)
             self.load_base_map()
 
         if self.df is not None:
+            if self.show_heatmap and not self.is_3d_mode:
+                self.generate_heatmap()
             self.update_aircraft_positions()
 
     def load_base_map(self):
@@ -143,12 +191,15 @@ class MapWidget(QWidget):
         <title>ASTERIX Radar View</title>
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
         <style>
             body { margin: 0; padding: 0; }
             #map { width: 100%; height: 100vh; }
             .aircraft-marker { background: transparent; border: none; display: flex; align-items: center; justify-content: center; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); }
             .leaflet-popup-content { background: rgba(255, 255, 255, 0.95) !important; border-radius: 6px !important; color: #333 !important; font-size: 13px !important; }
             .leaflet-popup-tip { background: rgba(255, 255, 255, 0.95) !important; }
+            .leaflet-tooltip { background: rgba(0, 0, 0, 0.7) !important; border: none !important; color: white !important; font-size: 10px !important; font-weight: bold !important; padding: 2px 5px !important; border-radius: 3px !important; box-shadow: 0 1px 3px rgba(0,0,0,0.4) !important; }
+            .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { border: none !important; }
             .info.legend { background: rgba(255,255,255,0.9); padding: 8px 10px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); line-height: 1.4em; font: 12px/1.4 'Segoe UI', Arial, sans-serif; }
             .legend .item { display: flex; align-items: center; margin: 4px 0; }
             .legend .swatch { width: 14px; height: 14px; margin-right: 6px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2); }
@@ -178,6 +229,8 @@ class MapWidget(QWidget):
             var aircraftMarkers = {};
             var aircraftTrails = {};
             var aircraftColors = {};
+            window.heatLayer = null;
+            window.showLabels = false;
 
             function getAircraftColor(address) {
                 if (aircraftColors[address]) return aircraftColors[address];
@@ -199,7 +252,22 @@ class MapWidget(QWidget):
                 return (bearing + 360) % 360;
             }
 
-            window.updateAircraft = function(data) {
+            window.addHeatmap = function(data) {
+                if (window.heatLayer) {
+                    map.removeLayer(window.heatLayer);
+                }
+                window.heatLayer = L.heatLayer(data, {
+                    radius: 20,
+                    blur: 15,
+                    maxZoom: 13,
+                    max: 1.0,
+                    gradient: {0.0: 'blue', 0.5: 'lime', 0.7: 'yellow', 1.0: 'red'}
+                }).addTo(map);
+            };
+
+            window.updateAircraft = function(data, showLabels) {
+                window.showLabels = showLabels;
+
                 Object.values(aircraftMarkers).forEach(marker => {
                     if (marker.trailLine) {
                         map.removeLayer(marker.trailLine);
@@ -252,6 +320,16 @@ class MapWidget(QWidget):
                                    '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
                                    '<strong>Heading:</strong> ' + Math.round(rotation) + '°');
 
+                    if (showLabels && aircraft.callsign) {
+                        marker.bindTooltip(aircraft.callsign, {
+                            permanent: true,
+                            direction: 'top',
+                            offset: [0, -10],
+                            opacity: 0.9,
+                            className: 'aircraft-label'
+                        });
+                    }
+
                     marker.addTo(map);
                     marker.lastRotation = rotation;
                     aircraftMarkers[markerId] = marker;
@@ -293,6 +371,10 @@ class MapWidget(QWidget):
                 aircraftMarkers = {}; 
                 aircraftTrails = {}; 
                 aircraftColors = {};
+                if (window.heatLayer) {
+                    map.removeLayer(window.heatLayer);
+                    window.heatLayer = null;
+                }
             };
         </script>
     </body>
@@ -429,10 +511,11 @@ class MapWidget(QWidget):
         </div>
 
         <script>
-            const {DeckGL, ScatterplotLayer, PathLayer, ColumnLayer} = deck;
+            const {DeckGL, ScatterplotLayer, PathLayer, ColumnLayer, TextLayer} = deck;
             let aircraftData = [];
             let trailsData = {};
             let radarPosition = {lon: 2.102058, lat: 41.300702};
+            let showLabels = false;
 
             const deckgl = new DeckGL({
                 container: 'map',
@@ -562,11 +645,39 @@ class MapWidget(QWidget):
                     getWidth: 1.5
                 });
 
-                deckgl.setProps({ layers: [pathLayer, radarLayer, aircraftLayer] });
+                const layers = [pathLayer, radarLayer, aircraftLayer];
+
+                if (showLabels) {
+                    const labelData = aircraftData.filter(d => d.callsign);
+
+                    const textLayer = new TextLayer({
+                        id: 'text-layer',
+                        data: labelData,
+                        pickable: false,
+                        getPosition: d => [d.lon, d.lat, (d.fl || 0) * 30.48 + 200],
+                        getText: d => d.callsign,
+                        getSize: 14,
+                        getColor: [255, 255, 255],
+                        getAngle: 0,
+                        getTextAnchor: 'middle',
+                        getAlignmentBaseline: 'center',
+                        billboard: true,
+                        backgroundColor: [0, 0, 0, 180],
+                        fontFamily: 'Arial, sans-serif',
+                        fontWeight: 'bold',
+                        outlineWidth: 2,
+                        outlineColor: [0, 0, 0, 255]
+                    });
+
+                    layers.push(textLayer);
+                }
+
+                deckgl.setProps({ layers: layers });
             }
 
-            window.updateAircraft = function(data) {
+            window.updateAircraft = function(data, enableLabels) {
                 aircraftData = data;
+                showLabels = enableLabels;
 
                 data.forEach(function(aircraft) {
                     var trailKey = aircraft.address + '_' + aircraft.cat;
@@ -901,7 +1012,8 @@ class MapWidget(QWidget):
 
             self.aircraft_label.setText(
                 f"Aircraft: {len(unique_tas)} (ADS-B: {adsb_count}, Radar: {radar_count})")
-            js_code = f"updateAircraft({json.dumps(aircraft_data)});"
+
+            js_code = f"updateAircraft({json.dumps(aircraft_data)}, {json.dumps(self.show_labels)});"
             self.web_view.page().runJavaScript(js_code)
         else:
             self.aircraft_label.setText("Aircraft: 0")
