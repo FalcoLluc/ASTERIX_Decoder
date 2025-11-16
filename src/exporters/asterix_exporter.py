@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Iterable
 from src.models.record import Record
 from src.types.enums import CAT021ItemType, CAT048ItemType, Category
 from src.utils.qnh_corrector import QNHCorrector
@@ -82,30 +82,41 @@ class AsterixExporter:
     ]
 
     @staticmethod
-    def records_to_dataframe(records: List[Record], apply_qnh: bool = True) -> pd.DataFrame:
-        rows = []
+    def records_to_dataframe(records: Iterable[Record], apply_qnh: bool = True) -> pd.DataFrame:
+        # Build by columns to avoid expensive list-of-dicts and reduce copies
+        columns = AsterixExporter.ALL_COLUMNS
+        data_cols = {col: [] for col in columns}
 
         for record in records:
-            row = {col: None for col in AsterixExporter.ALL_COLUMNS}
+            # Default row
+            row = {col: None for col in columns}
             row['CAT'] = record.category.value
 
+            # Fill category-specific fields
             if record.category == Category.CAT021:
                 AsterixExporter._process_cat021(record, row)
             elif record.category == Category.CAT048:
                 AsterixExporter._process_cat048(record, row)
 
-            rows.append(row)
+            # Append values to column arrays
+            for col in columns:
+                data_cols[col].append(row[col])
 
-        df = pd.DataFrame(rows, columns=AsterixExporter.ALL_COLUMNS)
+        df = pd.DataFrame(data_cols, columns=columns)
 
+        # Optimize dtypes to save memory and accelerate operations
         df = AsterixExporter._downcast_dtypes(df)
 
+        # Sort for deterministic order and better UX
         if 'Time_sec' in df.columns and 'TA' in df.columns:
             df.sort_values(['Time_sec', 'TA'], na_position='last', inplace=True)
             df.reset_index(drop=True, inplace=True)
 
-        df = df.loc[~((df['CAT'] == 21) & (df['GBS'] == 1))]
+        # Drop CAT021 ground test rows if present
+        if 'CAT' in df.columns and 'GBS' in df.columns:
+            df = df.loc[~((df['CAT'] == 21) & (df['GBS'] == 1))]
 
+        # Apply QNH correction if requested
         if apply_qnh:
             df = AsterixExporter._apply_qnh_correction(df)
 

@@ -15,7 +15,7 @@ from gui.map_widget import MapWidget
 from src.decoders.asterix_file_reader import AsterixFileReader
 from src.exporters.asterix_exporter import AsterixExporter
 from src.utils.asterix_filter import AsterixFilter
-from src.utils.handlers import decode_records
+from src.utils.handlers import decode_records, decode_records_iter
 
 # ============================================================
 # COLUMN DEFINITIONS FOR EACH CATEGORY
@@ -53,15 +53,13 @@ class ProcessingThread(QThread):
 
     def run(self):
         try:
-            self.progress.emit(10, "Reading file...")
+            self.progress.emit(10, "Reading and decoding records…")
             reader = AsterixFileReader(self.file_path)
-            records = list(reader.read_records())
+            # Lazy decode to avoid materializing the entire records list in memory
+            records_iter = decode_records_iter(reader.read_records())
 
-            self.progress.emit(40, f"Decoding {len(records)} records...")
-            records = decode_records(records)
-
-            self.progress.emit(60, "Exporting to DataFrame...")
-            df_raw = AsterixExporter.records_to_dataframe(records)
+            self.progress.emit(60, "Exporting to DataFrame…")
+            df_raw = AsterixExporter.records_to_dataframe(records_iter)
 
             self.progress.emit(100, "Complete!")
             self.finished.emit(df_raw)
