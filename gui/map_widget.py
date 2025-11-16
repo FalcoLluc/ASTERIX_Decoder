@@ -208,7 +208,12 @@ class MapWidget(QWidget):
     <body>
         <div id="map"></div>
         <script>
-            var map = L.map('map', { zoomControl: true, attributionControl: false }).setView([41.2972, 2.0833], 11);
+            var map = L.map('map', { 
+                zoomControl: true, 
+                attributionControl: false,
+                closePopupOnClick: false
+            }).setView([41.2972, 2.0833], 11);
+
             L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
                 maxZoom: 19, attribution: '', opacity: 0.95
             }).addTo(map);
@@ -229,6 +234,7 @@ class MapWidget(QWidget):
             var aircraftMarkers = {};
             var aircraftTrails = {};
             var aircraftColors = {};
+            var openPopups = {};
             window.heatLayer = null;
             window.showLabels = false;
 
@@ -268,12 +274,19 @@ class MapWidget(QWidget):
             window.updateAircraft = function(data, showLabels) {
                 window.showLabels = showLabels;
 
-                Object.values(aircraftMarkers).forEach(marker => {
+                var currentOpenPopups = {};
+                Object.keys(aircraftMarkers).forEach(function(markerId) {
+                    var marker = aircraftMarkers[markerId];
+                    if (marker.isPopupOpen()) {
+                        currentOpenPopups[markerId] = true;
+                    }
                     if (marker.trailLine) {
                         map.removeLayer(marker.trailLine);
                     }
                     map.removeLayer(marker);
                 });
+
+                openPopups = currentOpenPopups;
                 aircraftMarkers = {};
 
                 data.forEach(function(aircraft) {
@@ -312,13 +325,29 @@ class MapWidget(QWidget):
                     var altitudeStr = aircraft.altitude_display || 'N/A';
                     var mode3aStr = aircraft.mode3a || 'N/A';
 
-                    var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500})
-                        .bindPopup('<b>' + (aircraft.callsign || aircraft.address) + '</b><br>' +
+                    var popupContent = '<b>' + (aircraft.callsign || aircraft.address) + '</b><br>' +
                                    '<strong>Source:</strong> ' + srcText + '<br>' +
                                    '<strong>Mode3/A:</strong> ' + mode3aStr + '<br>' +
                                    '<strong>Altitude:</strong> ' + altitudeStr + '<br>' +
                                    '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
-                                   '<strong>Heading:</strong> ' + Math.round(rotation) + '°');
+                                   '<strong>Heading:</strong> ' + Math.round(rotation) + '°';
+
+                    var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500});
+
+                    var popup = L.popup({
+                        autoClose: false,
+                        closeOnClick: false
+                    }).setContent(popupContent);
+
+                    marker.bindPopup(popup);
+
+                    marker.on('popupopen', function() {
+                        openPopups[markerId] = true;
+                    });
+
+                    marker.on('popupclose', function() {
+                        delete openPopups[markerId];
+                    });
 
                     if (showLabels && aircraft.callsign) {
                         marker.bindTooltip(aircraft.callsign, {
@@ -333,6 +362,10 @@ class MapWidget(QWidget):
                     marker.addTo(map);
                     marker.lastRotation = rotation;
                     aircraftMarkers[markerId] = marker;
+
+                    if (openPopups[markerId]) {
+                        marker.openPopup();
+                    }
 
                     if (!aircraftTrails[trailKey]) {
                         aircraftTrails[trailKey] = [];
@@ -371,6 +404,7 @@ class MapWidget(QWidget):
                 aircraftMarkers = {}; 
                 aircraftTrails = {}; 
                 aircraftColors = {};
+                openPopups = {};
                 if (window.heatLayer) {
                     map.removeLayer(window.heatLayer);
                     window.heatLayer = null;
