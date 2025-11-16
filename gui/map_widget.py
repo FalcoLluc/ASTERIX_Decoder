@@ -1,6 +1,8 @@
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel, QComboBox, QCheckBox
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                                QSlider, QLabel, QComboBox, QCheckBox, QMessageBox,
+                                QDialog, QTextBrowser)
 from PySide6.QtGui import QShortcut, QKeySequence
 import pandas as pd
 import json
@@ -110,6 +112,11 @@ class MapWidget(QWidget):
 
         self.aircraft_label = QLabel("Aircraft: 0")
         control_layout.addWidget(self.aircraft_label)
+
+        self.help_btn = QPushButton("❓ Help")
+        self.help_btn.clicked.connect(self.show_help)
+        control_layout.addWidget(self.help_btn)
+
         control_layout.addStretch()
 
         layout.addLayout(control_layout)
@@ -123,6 +130,195 @@ class MapWidget(QWidget):
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self.skip_time(10))
 
         self.load_base_map()
+
+    def show_help(self):
+        """Display help dialog with all controls and features explained."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
+
+        help_text = """
+    <h2>ASTERIX DECODER - USER GUIDE</h2>
+
+    <h3>🎮 Playback Controls (Top Bar)</h3>
+    <ul>
+    <li><b>▶ Play / ⏸ Pause:</b> Start or pause the simulation replay</li>
+    <li><b>🔄 Reset:</b> Return to the beginning of the recording</li>
+    <li><b>Speed Slider:</b> Adjust playback speed from 1x to 60x</li>
+    <li><b>Time Slider:</b> Manually scrub through the timeline (drag to jump to specific time)</li>
+    <li><b>Time Display:</b> Shows start time, end time, and current time (Now: HH:MM:SS)</li>
+    <li><b>Aircraft Counter:</b> Real-time count showing ADS-B and Radar detections</li>
+    </ul>
+
+    <h3>🗺 View Controls (Top Bar)</h3>
+    <ul>
+    <li><b>🌐 Vista 3D / 🗺️ Vista 2D:</b> Toggle between 2D Leaflet map and 3D deck.gl visualization
+      <ul style="margin-top:5px;">
+      <li><i>2D Mode:</i> Traditional top-down map view with all features</li>
+      <li><i>3D Mode:</i> Perspective view with altitude-based positioning</li>
+      </ul>
+    </li>
+    <li><b>Source Dropdown:</b> Filter which detection system to display
+      <ul style="margin-top:5px;">
+      <li><i>Both:</i> Show ADS-B (CAT021) and Radar (CAT048) simultaneously</li>
+      <li><i>ADS-B Only:</i> Show only automatic dependent surveillance broadcasts</li>
+      <li><i>Radar Only:</i> Show only primary/secondary radar detections</li>
+      </ul>
+    </li>
+    <li><b>Show Labels:</b> Display aircraft callsigns as floating text near each aircraft (works in 2D and 3D)</li>
+    <li><b>Heat Map:</b> Show traffic density heatmap using color gradient (2D only)
+      <ul style="margin-top:5px;">
+      <li><i>Blue:</i> Low traffic density</li>
+      <li><i>Green/Yellow:</i> Medium traffic density</li>
+      <li><i>Red:</i> High traffic density</li>
+      </ul>
+    </li>
+    </ul>
+
+    <h3>📂 File Operations (Top Buttons)</h3>
+    <ul>
+    <li><b>Load ASTERIX File:</b> Open and decode a new ASTERIX binary file</li>
+    <li><b>Apply Filters:</b> Apply selected filters to the dataset (updates view and counts)</li>
+    <li><b>Export CSV:</b> Export currently displayed data to CSV format</li>
+    <li><b>Reset All Filters:</b> Clear all filters and show complete dataset</li>
+    </ul>
+
+    <h3>🏷 ASTERIX Category Filters (Left Panel)</h3>
+    <ul>
+    <li><b>CAT021 (ADS-B):</b> Toggle ADS-B detections on/off</li>
+    <li><b>CAT048 (Radar):</b> Toggle Radar detections on/off</li>
+    </ul>
+
+    <h3>🎯 Detection Quality Filters (Left Panel)</h3>
+    <ul>
+    <li><b>Remove White Noise (PSR-only):</b> Filter out primary radar returns without transponder (reduces clutter)</li>
+    <li><b>Remove Fixed Transponders (7777):</b> Filter out ground-based fixed transponders</li>
+    </ul>
+
+    <h3>✈️ Altitude Filters (Left Panel)</h3>
+    <ul>
+    <li><b>Min FL:</b> Minimum Flight Level to display (0-600)</li>
+    <li><b>Max FL:</b> Maximum Flight Level to display (0-600)</li>
+    <li><i>Example:</i> Set Min FL=100, Max FL=300 to show only medium altitude traffic</li>
+    </ul>
+
+    <h3>🚁 Status Filters (Right Panel)</h3>
+    <ul>
+    <li><b>Airborne Only:</b> Show only aircraft in flight (excludes ground movements)</li>
+    <li><b>On Ground Only:</b> Show only aircraft on the ground (taxi, parking)</li>
+    </ul>
+
+    <h3>🔍 Custom Filters (Bottom Panel)</h3>
+    <ul>
+    <li><b>Callsign:</b> Filter by aircraft callsign (e.g., RYR, IBE, VLG)</li>
+    <li><b>Min Speed (kt):</b> Minimum ground speed in knots</li>
+    <li><b>Geographic Bounds:</b> Limit display to Barcelona area coordinates</li>
+    </ul>
+
+    <h3>📊 Data Views (Top Tabs)</h3>
+    <ul>
+    <li><b>Table View:</b> Spreadsheet view with all decoded ASTERIX fields</li>
+    <li><b>Map View:</b> Geographic visualization with playback controls (current view)</li>
+    </ul>
+
+    <h3>✈️ Aircraft Information</h3>
+    <ul>
+    <li><b>Click on any aircraft</b> to see detailed popup with:
+      <ul style="margin-top:5px;">
+      <li>Callsign and Target Address (unique identifier)</li>
+      <li>Detection source (ADS-B CAT021 or Radar CAT048)</li>
+      <li>Mode 3/A transponder code (4-digit octal code)</li>
+      <li>Altitude (Flight Level or feet with QNH correction)</li>
+      <li>Ground speed in knots</li>
+      <li>Current heading in degrees</li>
+      </ul>
+    </li>
+    <li><b>Popups persist:</b> They stay open during playback until manually closed with X</li>
+    <li><b>Multiple popups:</b> You can open multiple aircraft popups simultaneously</li>
+    </ul>
+
+    <h3>🎨 Visual Elements</h3>
+    <ul>
+    <li><b>Orange aircraft (✈):</b> ADS-B detection (CAT021) - cooperative surveillance</li>
+    <li><b>Red aircraft (✈):</b> Radar detection (CAT048) - primary/secondary radar</li>
+    <li><b>Colored trails:</b> Each aircraft has a unique persistent trajectory with consistent color</li>
+    <li><b>Purple radar icon (𖦏):</b> Barcelona radar position (SAC: 20, SIC: 129)</li>
+    <li><b>Aircraft orientation:</b> Icon automatically rotates based on flight direction</li>
+    <li><b>Trail thickness:</b> Indicates recent movement (thicker = more recent)</li>
+    </ul>
+
+    <h3>⌨️ Keyboard Shortcuts</h3>
+    <ul>
+    <li><b>Space:</b> Play/Pause toggle</li>
+    <li><b>← Left Arrow:</b> Skip backward 10 seconds</li>
+    <li><b>→ Right Arrow:</b> Skip forward 10 seconds</li>
+    </ul>
+
+    <h3>🖱 Map Controls (2D Mode)</h3>
+    <ul>
+    <li><b>Drag:</b> Pan the map</li>
+    <li><b>Scroll:</b> Zoom in/out</li>
+    <li><b>Double-click:</b> Zoom to location</li>
+    <li><b>+/- buttons:</b> Zoom controls (top-left)</li>
+    </ul>
+
+    <h3>🖱 Map Controls (3D Mode)</h3>
+    <ul>
+    <li><b>Drag:</b> Rotate view around center point</li>
+    <li><b>Scroll:</b> Zoom in/out</li>
+    <li><b>Shift + Drag:</b> Tilt/incline camera angle</li>
+    <li><b>Ctrl + Drag:</b> Pan the map</li>
+    </ul>
+
+    <h3>💡 Tips & Best Practices</h3>
+    <ul>
+    <li>Use <b>heat map</b> to identify busy airspace sectors and traffic patterns</li>
+    <li>Toggle between <b>2D and 3D</b> for different analytical perspectives</li>
+    <li>Apply <b>altitude filters</b> to focus on specific flight phases (approach, cruise, climb)</li>
+    <li>Use <b>Remove White Noise</b> to clean up radar data and reduce false targets</li>
+    <li>Increase playback <b>speed</b> to quickly review long recordings</li>
+    <li><b>Callsign filter</b> is useful to track specific airlines or flights</li>
+    <li>The <b>time slider</b> shows total recording duration with precise timestamps</li>
+    <li><b>Aircraft count</b> updates in real-time at bottom of playback controls</li>
+    <li>Click <b>Apply Filters</b> after changing filter settings to update the view</li>
+    <li>Export filtered data to <b>CSV</b> for external analysis or reporting</li>
+    </ul>
+
+    <h3>📝 Understanding Detection Sources</h3>
+    <ul>
+    <li><b>ADS-B (CAT021):</b> Aircraft broadcasts its own position, altitude, speed via transponder
+      <ul style="margin-top:5px;">
+      <li>More accurate positioning (GPS-based)</li>
+      <li>Includes velocity vector and flight intent</li>
+      <li>Requires aircraft with ADS-B equipment</li>
+      </ul>
+    </li>
+    <li><b>Radar (CAT048):</b> Ground radar detects and tracks aircraft
+      <ul style="margin-top:5px;">
+      <li>Works with all aircraft (with or without transponder)</li>
+      <li>Primary radar (PSR) sees physical reflections</li>
+      <li>Secondary radar (SSR) interrogates transponder</li>
+      </ul>
+    </li>
+    <li><b>Correlation:</b> Same aircraft may appear in both ADS-B and Radar simultaneously</li>
+    </ul>
+    """
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("ASTERIX DECODER - USER GUIDE")
+        dialog.resize(750, 650)
+
+        layout = QVBoxLayout()
+
+        text_browser = QTextBrowser()
+        text_browser.setHtml(help_text)
+        text_browser.setOpenExternalLinks(False)
+        layout.addWidget(text_browser)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec()
 
     def toggle_labels(self, state):
         """Toggle aircraft labels on/off."""
