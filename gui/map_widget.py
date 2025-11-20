@@ -267,39 +267,6 @@ class MapWidget(QWidget):
     <li><b>Shift + Drag:</b> Tilt/incline camera angle</li>
     <li><b>Ctrl + Drag:</b> Pan the map</li>
     </ul>
-
-    <h3>💡 Tips & Best Practices</h3>
-    <ul>
-    <li>Use <b>heat map</b> to identify busy airspace sectors and traffic patterns</li>
-    <li>Toggle between <b>2D and 3D</b> for different analytical perspectives</li>
-    <li>Apply <b>altitude filters</b> to focus on specific flight phases (approach, cruise, climb)</li>
-    <li>Use <b>Remove White Noise</b> to clean up radar data and reduce false targets</li>
-    <li>Increase playback <b>speed</b> to quickly review long recordings</li>
-    <li><b>Callsign filter</b> is useful to track specific airlines or flights</li>
-    <li>The <b>time slider</b> shows total recording duration with precise timestamps</li>
-    <li><b>Aircraft count</b> updates in real-time at bottom of playback controls</li>
-    <li>Click <b>Apply Filters</b> after changing filter settings to update the view</li>
-    <li>Export filtered data to <b>CSV</b> for external analysis or reporting</li>
-    </ul>
-
-    <h3>📝 Understanding Detection Sources</h3>
-    <ul>
-    <li><b>ADS-B (CAT021):</b> Aircraft broadcasts its own position, altitude, speed via transponder
-      <ul style="margin-top:5px;">
-      <li>More accurate positioning (GPS-based)</li>
-      <li>Includes velocity vector and flight intent</li>
-      <li>Requires aircraft with ADS-B equipment</li>
-      </ul>
-    </li>
-    <li><b>Radar (CAT048):</b> Ground radar detects and tracks aircraft
-      <ul style="margin-top:5px;">
-      <li>Works with all aircraft (with or without transponder)</li>
-      <li>Primary radar (PSR) sees physical reflections</li>
-      <li>Secondary radar (SSR) interrogates transponder</li>
-      </ul>
-    </li>
-    <li><b>Correlation:</b> Same aircraft may appear in both ADS-B and Radar simultaneously</li>
-    </ul>
     """
 
         dialog = QDialog(self)
