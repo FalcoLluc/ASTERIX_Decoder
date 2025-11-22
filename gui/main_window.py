@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QTableView, QLabel, QLineEdit, QSpinBox,
     QCheckBox, QMessageBox, QProgressDialog, QGroupBox, QHeaderView,
-    QTabWidget
+    QTabWidget, QApplication
 )
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer
 from PySide6.QtGui import QAction
@@ -22,14 +22,14 @@ CAT021_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
     'LAT', 'LON', 'H(m)', 'H(ft)',
     'FL', 'TA', 'TI', 'BP', 'SIM', 'TST',
-    'ATP', 'ARC', 'RC', 'DCR',  'GBS',
+    'ATP', 'ARC', 'RC', 'DCR', 'GBS',
 ]
 
 CAT048_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
     'RHO', 'THETA', 'LAT', 'LON', 'H_WGS84',
     'FL', 'TA', 'TI',
-    'TN','GS_TVP(kt)', 'GS_BDS(kt)', 'HDG',
+    'TN', 'GS_TVP(kt)', 'GS_BDS(kt)', 'HDG',
     'TYP', 'SIM', 'RDP', 'SPI', 'RAB',
     'ModeS', 'BP', 'RA', 'TTA', 'TAR', 'TAS',
     'MG_HDG', 'IAS', 'MACH', 'BAR', 'IVV',
@@ -47,13 +47,38 @@ def process_records_chunk(records_chunk):
     """
     from src.utils.handlers import decode_records
     from src.exporters.asterix_exporter import AsterixExporter
+    from src.utils.qnh_corrector import QNHCorrector
+    import pandas as pd
 
     try:
         # Decode records
         decoded = decode_records(records_chunk)
 
-        # Convert to DataFrame
-        df_chunk = AsterixExporter.records_to_dataframe(decoded, apply_qnh=True)
+        # Convert to DataFrame (apply_qnh=False manual control)
+        df_chunk = AsterixExporter.records_to_dataframe(decoded, apply_qnh=False)
+
+        # --- INTEGRACIÓN CORRECCIÓN QNH (Requisito Evaluación) ---
+        if not df_chunk.empty and 'FL' in df_chunk.columns:
+            corrector = QNHCorrector()
+            corrected_alts = []
+
+            has_ta = 'TA' in df_chunk.columns
+            has_bp = 'BP' in df_chunk.columns
+
+            for row in df_chunk.itertuples():
+                fl = getattr(row, 'FL', None)
+                ta = getattr(row, 'TA', None) if has_ta else None
+                bp = getattr(row, 'BP', None) if has_bp else None
+
+                # Calcular corrección (QNH o FL estandard)
+                alt_ft = corrector.correct(ta, fl, bp)
+                if alt_ft is None:
+                    alt_ft = (fl * 100.0) if pd.notna(fl) else None
+
+                corrected_alts.append(alt_ft)
+
+            df_chunk['H(ft)'] = corrected_alts
+        # ---------------------------------------------------------
 
         return df_chunk
     except Exception as e:
@@ -76,28 +101,24 @@ class ProcessingThread(QThread):
         self.file_path = file_path
         self.use_multiprocessing = use_multiprocessing
 
-        # Adaptive core selection
         total_cores = cpu_count()
         if total_cores <= 2:
-            self.n_workers = 1  # Single-core systems
+            self.n_workers = 1
         elif total_cores <= 4:
-            self.n_workers = total_cores - 1  # Small systems: leave 1 free
+            self.n_workers = total_cores - 1
         else:
-            self.n_workers = total_cores - 2  # Large systems: leave 2 free
+            self.n_workers = total_cores - 2
 
     def run(self):
         try:
-            # PHASE 1: Fast count (no decoding)
             self.progress.emit(5, "Counting records...")
             reader_count = AsterixFileReader(self.file_path)
             total_records = sum(1 for _ in reader_count.read_records())
 
-            # PHASE 2: Read all records (fast, no decoding yet)
             self.progress.emit(10, "Reading records...")
             reader_decode = AsterixFileReader(self.file_path)
             all_records = list(reader_decode.read_records())
 
-            # PHASE 3: Decode with multiprocessing
             if self.use_multiprocessing and self.n_workers > 1:
                 df_raw = self._process_parallel(all_records, total_records)
             else:
@@ -111,9 +132,7 @@ class ProcessingThread(QThread):
             self.error.emit(f"{str(e)}\n\n{traceback.format_exc()}")
 
     def _process_sequential(self, all_records, total_records):
-        """Sequential processing (fallback)."""
         self.progress.emit(15, "Processing records (single-core)...")
-
         BATCH_SIZE = 50000
         all_dfs = []
         total_processed = 0
@@ -131,20 +150,14 @@ class ProcessingThread(QThread):
         return pd.concat(all_dfs, ignore_index=True)
 
     def _process_parallel(self, all_records, total_records):
-        """Parallel processing with multiprocessing."""
         self.progress.emit(15, f"Processing records ({self.n_workers} cores)...")
-
-        # Split records into chunks for parallel processing
         chunk_size = max(10000, len(all_records) // (self.n_workers * 4))
-        chunks = [all_records[i:i + chunk_size]
-                  for i in range(0, len(all_records), chunk_size)]
+        chunks = [all_records[i:i + chunk_size] for i in range(0, len(all_records), chunk_size)]
 
         all_dfs = []
         total_processed = 0
 
-        # Process chunks in parallel
         with Pool(processes=self.n_workers) as pool:
-            # Use imap_unordered for progress tracking
             for df_chunk in pool.imap_unordered(process_records_chunk, chunks):
                 if not df_chunk.empty:
                     all_dfs.append(df_chunk)
@@ -159,6 +172,7 @@ class ProcessingThread(QThread):
         self.progress.emit(90, "Merging results...")
         return pd.concat(all_dfs, ignore_index=True)
 
+
 # ============================================================
 # MAIN WINDOW
 # ============================================================
@@ -172,6 +186,7 @@ class AsterixGUI(QMainWindow):
         self.model = None
         self.filters_dirty = False
         self.pending_filters = False
+        self.p3_callsigns = None  # Para guardar la lista del Excel
         self.init_ui()
 
     def init_ui(self):
@@ -218,9 +233,6 @@ class AsterixGUI(QMainWindow):
 
         layout.addWidget(self.create_custom_filter_panel())
 
-    # ============================================================
-    # Menu bar
-    # ============================================================
     def create_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
@@ -236,24 +248,17 @@ class AsterixGUI(QMainWindow):
         file_menu.addAction(export_action)
 
         file_menu.addSeparator()
-
         exit_action = QAction("🚪 E&xit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-    # ============================================================
-    # Load toolbar
-    # ============================================================
     def create_load_toolbar(self):
         layout = QHBoxLayout()
-
         self.load_btn = QPushButton("📁 Load ASTERIX File")
         self.load_btn.clicked.connect(self.load_file)
         layout.addWidget(self.load_btn)
-
         layout.addStretch()
-
         self.apply_btn = QPushButton("✅ Apply Filters")
         self.apply_btn.clicked.connect(self.apply_dynamic_filters)
         self.apply_btn.setEnabled(False)
@@ -262,64 +267,47 @@ class AsterixGUI(QMainWindow):
             "QPushButton:disabled { background-color: #cccccc; color: white; }"
         )
         layout.addWidget(self.apply_btn)
-
         self.export_btn = QPushButton("💾 Export CSV")
         self.export_btn.clicked.connect(self.export_csv)
         self.export_btn.setEnabled(False)
         layout.addWidget(self.export_btn)
-
         self.reset_btn = QPushButton("🔄 Reset All Filters")
         self.reset_btn.clicked.connect(self.reset_filters)
         self.reset_btn.setEnabled(False)
         layout.addWidget(self.reset_btn)
-
         return layout
 
-    # ============================================================
-    # Filter Panels
-    # ============================================================
     def create_category_filter_panel(self):
-        """Category ASTERIX filter panel"""
         group = QGroupBox("📡 ASTERIX Category")
         layout = QVBoxLayout()
-
         self.cat021_check = QCheckBox("CAT021 (ADS-B)")
         self.cat021_check.setChecked(True)
         self.cat021_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.cat021_check)
-
         self.cat048_check = QCheckBox("CAT048 (Radar)")
         self.cat048_check.setChecked(True)
         self.cat048_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.cat048_check)
-
         group.setLayout(layout)
         return group
 
     def create_detection_filter_panel(self):
-        """Detection filter panel"""
         group = QGroupBox("🎯 Detection")
         layout = QVBoxLayout()
-
         self.white_noise_check = QCheckBox("Remove White Noise (PSR-only)")
         self.white_noise_check.setChecked(True)
         self.white_noise_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.white_noise_check)
-
-        # NEW: Fixed transponder filter
         self.fixed_transponder_check = QCheckBox("Remove Fixed Transponders (7777)")
         self.fixed_transponder_check.setChecked(True)
         self.fixed_transponder_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.fixed_transponder_check)
-
         group.setLayout(layout)
         return group
 
     def create_altitude_filter_panel(self):
-        """Altitude / Flight Level filter panel"""
         group = QGroupBox("📏 Altitude")
         layout = QVBoxLayout()
-
         min_layout = QHBoxLayout()
         min_layout.addWidget(QLabel("Min FL:"))
         self.min_fl_spin = QSpinBox()
@@ -330,7 +318,6 @@ class AsterixGUI(QMainWindow):
         min_layout.addWidget(self.min_fl_spin)
         min_layout.addStretch()
         layout.addLayout(min_layout)
-
         max_layout = QHBoxLayout()
         max_layout.addWidget(QLabel("Max FL:"))
         self.max_fl_spin = QSpinBox()
@@ -341,30 +328,24 @@ class AsterixGUI(QMainWindow):
         max_layout.addWidget(self.max_fl_spin)
         max_layout.addStretch()
         layout.addLayout(max_layout)
-
         group.setLayout(layout)
         return group
 
     def create_status_filter_panel(self):
-        """Status filter panel"""
         group = QGroupBox("✈️ Status")
         layout = QVBoxLayout()
-
         self.airborne_check = QCheckBox("Airborne Only")
         self.airborne_check.setChecked(False)
         self.airborne_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.airborne_check)
-
         self.ground_check = QCheckBox("On Ground Only")
         self.ground_check.setChecked(False)
         self.ground_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.ground_check)
-
         group.setLayout(layout)
         return group
 
     def create_custom_filter_panel(self):
-        """Custom filters: Callsign, Speed, Geographic"""
         group = QGroupBox("🔍 Custom Filters")
         layout = QHBoxLayout()
 
@@ -388,39 +369,73 @@ class AsterixGUI(QMainWindow):
         self.geo_filter_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.geo_filter_check)
 
+        # --- NEW: P3 EXCEL FILTER ---
+        layout.addSpacing(15)
+        p3_layout = QVBoxLayout()
+        p3_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.btn_load_p3 = QPushButton("📂 Load P3 Excel")
+        self.btn_load_p3.clicked.connect(self.load_p3_excel)
+        self.btn_load_p3.setFixedSize(110, 25)
+        p3_layout.addWidget(self.btn_load_p3)
+
+        self.check_p3_only = QCheckBox("Only P3 Take-offs")
+        self.check_p3_only.setEnabled(False)
+        self.check_p3_only.stateChanged.connect(self.on_filter_changed)
+        p3_layout.addWidget(self.check_p3_only)
+
+        layout.addLayout(p3_layout)
+        # -----------------------------
+
         layout.addStretch()
         group.setLayout(layout)
         return group
 
-    # ============================================================
-    # Signal handler
-    # ============================================================
+    def load_p3_excel(self):
+        """Load Excel file with departure list"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select P3 Departures Excel", "", "Excel Files (*.xlsx *.xls)"
+        )
+        if not file_path:
+            return
+
+        try:
+            df_excel = pd.read_excel(file_path)
+            if 'Indicativo' not in df_excel.columns:
+                QMessageBox.warning(self, "Error", "El Excel no tiene columna 'Indicativo'.")
+                return
+
+            self.p3_callsigns = set(df_excel['Indicativo'].astype(str).str.strip().str.upper())
+
+            self.check_p3_only.setEnabled(True)
+            self.check_p3_only.setChecked(True)
+            self.btn_load_p3.setText("✅ Excel Loaded")
+            self.btn_load_p3.setStyleSheet("background-color: #e8f5e9; color: #2e7d32; font-weight: bold;")
+            self.status_label.setText(f"✅ Loaded {len(self.p3_callsigns)} flights from Excel.")
+            self.on_filter_changed()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error loading Excel:\n{str(e)}")
+
     def on_filter_changed(self):
-        """Called when any filter changes"""
         if self.df_raw is None:
             self.pending_filters = True
             if hasattr(self, 'status_label'):
-                self.status_label.setText("⚙️ Filters selected — they will be applied automatically after loading.")
+                self.status_label.setText("⚙️ Filters selected — will apply after loading.")
             return
-
         self.filters_dirty = True
         self.apply_btn.setEnabled(True)
         self.status_label.setText("⚠️ Filters changed — click 'Apply Filters' to update.")
 
-    # ============================================================
-    # Load and process ASTERIX file
-    # ============================================================
     def load_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open ASTERIX File", "", "ASTERIX Files (*.ast);;All Files (*)"
         )
         if not file_path:
             return
-
         progress = QProgressDialog("Loading file...", "Cancel", 0, 100, self)
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setAutoClose(True)
-
         self.thread = ProcessingThread(file_path)
         self.thread.finished.connect(self.on_load_complete)
         self.thread.error.connect(self.on_load_error)
@@ -429,34 +444,23 @@ class AsterixGUI(QMainWindow):
 
     @Slot(pd.DataFrame)
     def on_load_complete(self, df_raw):
-        """Handle completion of file load and decode"""
         self.df_raw = df_raw
         self.df_display = df_raw
-
-        # Enable filter controls
         self.export_btn.setEnabled(True)
         self.reset_btn.setEnabled(True)
         self.apply_btn.setEnabled(False)
         self.filters_dirty = False
-
-        # ✅ FIX: Apply filters and then display
         self.apply_dynamic_filters()
 
     @Slot(str)
     def on_load_error(self, msg):
         QMessageBox.critical(self, "Error", f"Failed to load file:\n{msg}")
 
-    # ============================================================
-    # Display DataFrame with smart column filtering
-    # ============================================================
     def display_dataframe(self, df):
-        """Display DataFrame - all columns if both CAT selected, else category-specific"""
         if df is None or df.empty:
             return
-
         cat021_selected = self.cat021_check.isChecked()
         cat048_selected = self.cat048_check.isChecked()
-
         if cat021_selected and cat048_selected:
             df_display = df
         elif cat021_selected:
@@ -465,30 +469,21 @@ class AsterixGUI(QMainWindow):
         else:
             cols = [col for col in CAT048_COLUMNS if col in df.columns]
             df_display = df[cols]
-
         self.model = PandasModel(df_display)
         self.table.setModel(self.model)
-
         header = self.table.horizontalHeader()
         for col in range(min(15, df_display.shape[1])):
             self.table.resizeColumnToContents(col)
-
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
-    # ============================================================
-    # Apply filters on demand
-    # ============================================================
     def apply_dynamic_filters(self):
-        """Apply all filters using AsterixFilter methods"""
         if self.df_raw is None:
             return
-
         self.setCursor(Qt.CursorShape.WaitCursor)
-
         try:
             df = self.df_raw
 
-            # 1. CATEGORY FILTER (✅ FIX: Use boolean array directly)
+            # 1. CATEGORY
             if 'CAT' in df.columns:
                 cat_mask = np.zeros(len(df), dtype=bool)
                 if self.cat021_check.isChecked():
@@ -497,60 +492,68 @@ class AsterixGUI(QMainWindow):
                     cat_mask |= (df['CAT'].to_numpy(copy=False) == 48)
                 df = df[cat_mask]
 
-            # 2. WHITE NOISE FILTER
+            # 2. WHITE NOISE
             if self.white_noise_check.isChecked():
                 df = AsterixFilter.filter_white_noise(df)
 
-            # 3. FIXED TRANSPONDER FILTER (NEW)
+            # 3. FIXED TRANSPONDER
             if self.fixed_transponder_check.isChecked():
                 df = AsterixFilter.filter_fixed_transponders(df)
 
-            # 4. ALTITUDE FILTER
+            # 4. ALTITUDE
             min_fl = self.min_fl_spin.value()
             max_fl = self.max_fl_spin.value()
             if min_fl > 0 or max_fl < 600:
-                df = AsterixFilter.filter_by_altitude(
-                    df,
-                    min_fl=min_fl if min_fl > 0 else None,
-                    max_fl=max_fl if max_fl < 600 else None
-                )
+                df = AsterixFilter.filter_by_altitude(df, min_fl=min_fl, max_fl=max_fl)
 
-            # 5. AIRBORNE FILTER
+            # 5. AIRBORNE
             if self.airborne_check.isChecked():
                 df = AsterixFilter.filter_airborne(df)
 
-            # 6. ON GROUND FILTER
+            # 6. GROUND
             if self.ground_check.isChecked():
                 df = AsterixFilter.filter_on_ground(df)
 
-            # 7. CALLSIGN FILTER (simplified: single pattern only)
+            # 7. CALLSIGN
             callsign_text = self.callsign_input.text().strip()
             if callsign_text and 'TI' in df.columns:
                 df = AsterixFilter.filter_by_callsign(df, callsign_text)
 
-            # 8. SPEED FILTER
+            # 8. SPEED
             min_speed = self.min_speed_spin.value()
             if min_speed > 0:
                 df = AsterixFilter.filter_by_speed(df, min_speed=min_speed)
 
-            # 9. GEOGRAPHIC FILTER
+            # 9. GEOGRAPHIC
             if self.geo_filter_check.isChecked():
                 df = AsterixFilter.filter_by_geographic_bounds(df)
 
+            # 10. P3 EXCEL FILTER (Nuevo)
+            if self.check_p3_only.isChecked() and self.p3_callsigns:
+                if 'TI' in df.columns:
+                    temp_ti = df['TI'].astype(str).str.strip().str.upper()
+                    df = df[temp_ti.isin(self.p3_callsigns)]
+
             self.df_display = df
 
+            # Logic to handle exclusive filters
             cats_in_data = set(self.df_display['CAT'].unique()) if 'CAT' in self.df_display.columns else set()
             only_cat021 = (cats_in_data == {21})
             self.airborne_check.setEnabled(not only_cat021)
             self.ground_check.setEnabled(not only_cat021)
+
             if only_cat021:
+                # ✅ FIX: Bloquear señales para evitar bucle infinito
+                self.airborne_check.blockSignals(True)
+                self.ground_check.blockSignals(True)
                 self.airborne_check.setChecked(False)
                 self.ground_check.setChecked(False)
+                self.airborne_check.blockSignals(False)
+                self.ground_check.blockSignals(False)
 
             self.display_dataframe(self.df_display)
             self.update_map()
             self.update_status_label()
-
             self.filters_dirty = False
             self.apply_btn.setEnabled(False)
 
@@ -560,11 +563,10 @@ class AsterixGUI(QMainWindow):
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def reset_filters(self):
-        """Reset all filters to defaults"""
         self.cat021_check.setChecked(True)
         self.cat048_check.setChecked(True)
         self.white_noise_check.setChecked(True)
-        self.fixed_transponder_check.setChecked(True)  # NEW
+        self.fixed_transponder_check.setChecked(True)
         self.min_fl_spin.setValue(0)
         self.max_fl_spin.setValue(600)
         self.airborne_check.setChecked(False)
@@ -573,26 +575,23 @@ class AsterixGUI(QMainWindow):
         self.min_speed_spin.setValue(0)
         self.geo_filter_check.setChecked(True)
 
+        # Reset P3 filter
+        self.check_p3_only.setChecked(False)
+        self.check_p3_only.setEnabled(False)
+        self.p3_callsigns = None
+        self.btn_load_p3.setText("📂 Load P3 Excel")
+        self.btn_load_p3.setStyleSheet("")
+
         self.apply_dynamic_filters()
 
-    # ============================================================
-    # Helper methods
-    # ============================================================
     def update_map(self):
-        """Update map with filtered data"""
         if self.df_display is None or self.df_display.empty:
-            print("⚠️ No data to display on map")
             return
-
-        # ✅ FIXED: Added H(ft), Mode3/A, and GS(kt)
         map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'H(ft)',
                        'Mode3/A', 'GS(kt)', 'GS_TVP(kt)', 'GS_BDS(kt)']
         available_cols = [col for col in map_columns if col in self.df_display.columns]
-
         if len(available_cols) < 3:
-            print(f"⚠️ Insufficient map columns: {available_cols}")
             return
-
         try:
             map_data = self.df_display[available_cols]
             self.map_widget.load_data(map_data)
@@ -600,7 +599,6 @@ class AsterixGUI(QMainWindow):
             print(f"❌ Error updating map: {str(e)}")
 
     def update_status_label(self):
-        """Update status bar with filter statistics"""
         if self.df_display is None:
             return
         cat021_count = (self.df_display['CAT'] == 21).sum() if 'CAT' in self.df_display.columns else 0
@@ -610,21 +608,15 @@ class AsterixGUI(QMainWindow):
             f"📊 Displaying: {total_count:,} records (CAT021: {cat021_count:,}, CAT048: {cat048_count:,}) | Total: {total_count:,} records"
         )
 
-    # ============================================================
-    # Export CSV
-    # ============================================================
     def export_csv(self):
-        """Export currently displayed DataFrame to CSV file"""
         if self.df_display is None or self.df_display.empty:
             QMessageBox.warning(self, "Warning", "No data to export.")
             return
-
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Export CSV", "asterix_filtered.csv", "CSV Files (*.csv)"
         )
         if not file_path:
             return
-
         try:
             AsterixExporter.export_to_csv(self.df_display, file_path)
             QMessageBox.information(
@@ -635,27 +627,16 @@ class AsterixGUI(QMainWindow):
             QMessageBox.critical(self, "Error", str(e))
 
 
-# ============================================================
-# Entry point
-# ============================================================
-# ============================================================
-# Entry point
-# ============================================================
 if __name__ == '__main__':
     import multiprocessing
     import sys
     from PySide6.QtWidgets import QApplication
 
-    # Set multiprocessing start method (must be inside __main__)
     multiprocessing.set_start_method('spawn', force=True)
-
-    # Required for frozen executables (PyInstaller)
     multiprocessing.freeze_support()
 
-    # Create and run application
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     window = AsterixGUI()
     window.show()
     sys.exit(app.exec())
-
