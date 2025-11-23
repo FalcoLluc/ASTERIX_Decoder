@@ -49,28 +49,7 @@ def process_records_chunk(records_chunk):
 
     try:
         decoded = decode_records(records_chunk)
-        df_chunk = AsterixExporter.records_to_dataframe(decoded, apply_qnh=False)
-
-        if not df_chunk.empty and 'FL' in df_chunk.columns:
-            corrector = QNHCorrector()
-            corrected_alts = []
-
-            has_ta = 'TA' in df_chunk.columns
-            has_bp = 'BP' in df_chunk.columns
-
-            for row in df_chunk.itertuples():
-                fl = getattr(row, 'FL', None)
-                ta = getattr(row, 'TA', None) if has_ta else None
-                bp = getattr(row, 'BP', None) if has_bp else None
-
-                alt_ft = corrector.correct(ta, fl, bp)
-                if alt_ft is None:
-                    alt_ft = (fl * 100.0) if pd.notna(fl) else None
-
-                corrected_alts.append(alt_ft)
-
-            df_chunk['H(ft)'] = corrected_alts
-
+        df_chunk = AsterixExporter.records_to_dataframe(decoded)
         return df_chunk
     except Exception as e:
         import traceback
@@ -143,8 +122,13 @@ class ProcessingThread(QThread):
             progress_pct = 15 + int((total_processed / total_records) * 75)
             self.progress.emit(progress_pct, f"Processed {total_processed:,} / {total_records:,} records...")
 
-        self.progress.emit(90, "Merging results...")
-        return pd.concat(all_dfs, ignore_index=True)
+        self.progress.emit(85, "Merging results...")
+        df_merged = pd.concat(all_dfs, ignore_index=True)
+
+        self.progress.emit(90, "Applying QNH correction...")
+        df_corrected = self._apply_qnh_with_corrector(df_merged)
+
+        return df_corrected
 
     def _process_parallel(self, all_records, total_records):
         """Decode records in parallel using a worker Pool, emitting progress."""
@@ -167,9 +151,31 @@ class ProcessingThread(QThread):
                     f"Processed {min(total_processed, total_records):,} / {total_records:,} records..."
                 )
 
-        self.progress.emit(90, "Merging results...")
-        return pd.concat(all_dfs, ignore_index=True)
+        self.progress.emit(85, "Merging results...")
+        df_merged = pd.concat(all_dfs, ignore_index=True)
 
+        self.progress.emit(90, "Applying QNH correction...")
+        df_corrected = self._apply_qnh_with_corrector(df_merged)
+
+        return df_corrected
+
+    def _apply_qnh_with_corrector(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply QNH correction using QNHCorrector (temporal state tracking)."""
+        from src.utils.qnh_corrector import QNHCorrector
+
+        if df.empty or 'FL' not in df.columns:
+            return df
+
+        # ✅ Sort by time and aircraft to ensure temporal order
+        if 'Time_sec' in df.columns and 'TA' in df.columns:
+            df = df.sort_values(['TA', 'Time_sec'], na_position='last').reset_index(drop=True)
+
+
+        # ✅ Use new vectorized method
+        corrector = QNHCorrector()
+        df = corrector.correct_dataframe(df)
+
+        return df
 
 # ============================================================
 # MAIN WINDOW

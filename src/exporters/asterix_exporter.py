@@ -82,7 +82,7 @@ class AsterixExporter:
     ]
 
     @staticmethod
-    def records_to_dataframe(records: Iterable[Record], apply_qnh: bool = True) -> pd.DataFrame:
+    def records_to_dataframe(records: Iterable[Record]) -> pd.DataFrame:
         # Build by columns to avoid expensive list-of-dicts and reduce copies
         columns = AsterixExporter.ALL_COLUMNS
         data_cols = {col: [] for col in columns}
@@ -115,10 +115,6 @@ class AsterixExporter:
         # Drop CAT021 ground test rows if present
         if 'CAT' in df.columns and 'GBS' in df.columns:
             df = df.loc[~((df['CAT'] == 21) & (df['GBS'] == 1))]
-
-        # Apply QNH correction if requested
-        if apply_qnh:
-            df = AsterixExporter._apply_qnh_correction(df)
 
         return df
 
@@ -154,37 +150,6 @@ class AsterixExporter:
                         df[col] = df[col].astype(dtype)
                 except (ValueError, TypeError):
                     pass
-
-        return df
-
-    @staticmethod
-    def _apply_qnh_correction(df: pd.DataFrame) -> pd.DataFrame:
-        if 'FL' not in df.columns or 'TA' not in df.columns:
-            return df
-
-        # Initialize result columns with NaN
-        df['H(ft)'] = np.nan
-        df['H(m)'] = np.nan
-
-        # Vectorized: Get all altitudes in feet
-        alt_ft = df['FL'].fillna(0) * 100.0
-
-        # Filter: Only process records below transition altitude
-        below_ta_mask = alt_ft < 6000.0
-
-        if not below_ta_mask.any():
-            return df
-
-        # Get BP values, use standard QNH if missing
-        bp = df.loc[below_ta_mask, 'BP'].fillna(1013.25)
-
-        # Vectorized correction calculation
-        correction_ft = (bp - 1013.25) * 30.0
-        corrected_alt = alt_ft[below_ta_mask] + correction_ft
-
-        # Assign results
-        df.loc[below_ta_mask, 'H(ft)'] = corrected_alt
-        df.loc[below_ta_mask, 'H(m)'] = corrected_alt * 0.3048
 
         return df
 
