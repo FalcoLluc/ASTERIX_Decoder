@@ -1175,7 +1175,12 @@ class MapWidget(QWidget):
         self.timer.stop()
         self._last_valid_rotation = {}
         self.update_time_label()
+
         self.web_view.page().runJavaScript("resetTrails();")
+
+        if self.show_separation:
+            self.web_view.page().runJavaScript("if(window.setSeparationMode) setSeparationMode(false);")
+
         self.update_aircraft_positions()
 
     def skip_time(self, seconds: float):
