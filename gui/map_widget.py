@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PySide6.QtGui import QShortcut, QKeySequence
 import pandas as pd
 import json
+import math
 
 
 class MapWidget(QWidget):
@@ -26,7 +27,8 @@ class MapWidget(QWidget):
         self._last_valid_rotation = {}
         self.show_labels = False
         self.show_heatmap = False
-
+        self.show_separation = False
+        self.departure_schedule = []
         self.init_ui()
 
     def _format_hms(self, seconds: float) -> str:
@@ -133,8 +135,6 @@ class MapWidget(QWidget):
 
     def show_help(self):
         """Display help dialog with all controls and features explained."""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton
-
         help_text = """
     <h2>ASTERIX DECODER - USER GUIDE</h2>
 
@@ -173,76 +173,10 @@ class MapWidget(QWidget):
     </li>
     </ul>
 
-    <h3>📂 File Operations (Top Buttons)</h3>
-    <ul>
-    <li><b>Load ASTERIX File:</b> Open and decode a new ASTERIX binary file</li>
-    <li><b>Apply Filters:</b> Apply selected filters to the dataset (updates view and counts)</li>
-    <li><b>Export CSV:</b> Export currently displayed data to CSV format</li>
-    <li><b>Reset All Filters:</b> Clear all filters and show complete dataset</li>
-    </ul>
-
-    <h3>🏷 ASTERIX Category Filters (Left Panel)</h3>
-    <ul>
-    <li><b>CAT021 (ADS-B):</b> Toggle ADS-B detections on/off</li>
-    <li><b>CAT048 (Radar):</b> Toggle Radar detections on/off</li>
-    </ul>
-
-    <h3>🎯 Detection Quality Filters (Left Panel)</h3>
-    <ul>
-    <li><b>Remove White Noise (PSR-only):</b> Filter out primary radar returns without transponder (reduces clutter)</li>
-    <li><b>Remove Fixed Transponders (7777):</b> Filter out ground-based fixed transponders</li>
-    </ul>
-
-    <h3>✈️ Altitude Filters (Left Panel)</h3>
-    <ul>
-    <li><b>Min FL:</b> Minimum Flight Level to display (0-600)</li>
-    <li><b>Max FL:</b> Maximum Flight Level to display (0-600)</li>
-    <li><i>Example:</i> Set Min FL=100, Max FL=300 to show only medium altitude traffic</li>
-    </ul>
-
-    <h3>🚁 Status Filters (Right Panel)</h3>
-    <ul>
-    <li><b>Airborne Only:</b> Show only aircraft in flight (excludes ground movements)</li>
-    <li><b>On Ground Only:</b> Show only aircraft on the ground (taxi, parking)</li>
-    </ul>
-
-    <h3>🔍 Custom Filters (Bottom Panel)</h3>
-    <ul>
-    <li><b>Callsign:</b> Filter by aircraft callsign (e.g., RYR, IBE, VLG)</li>
-    <li><b>Min Speed (kt):</b> Minimum ground speed in knots</li>
-    <li><b>Geographic Bounds:</b> Limit display to Barcelona area coordinates</li>
-    </ul>
-
-    <h3>📊 Data Views (Top Tabs)</h3>
-    <ul>
-    <li><b>Table View:</b> Spreadsheet view with all decoded ASTERIX fields</li>
-    <li><b>Map View:</b> Geographic visualization with playback controls (current view)</li>
-    </ul>
-
     <h3>✈️ Aircraft Information</h3>
     <ul>
-    <li><b>Click on any aircraft</b> to see detailed popup with:
-      <ul style="margin-top:5px;">
-      <li>Callsign and Target Address (unique identifier)</li>
-      <li>Detection source (ADS-B CAT021 or Radar CAT048)</li>
-      <li>Mode 3/A transponder code (4-digit octal code)</li>
-      <li>Altitude (Flight Level or feet with QNH correction)</li>
-      <li>Ground speed in knots</li>
-      <li>Current heading in degrees</li>
-      </ul>
-    </li>
-    <li><b>Popups persist:</b> They stay open during playback until manually closed with X</li>
-    <li><b>Multiple popups:</b> You can open multiple aircraft popups simultaneously</li>
-    </ul>
-
-    <h3>🎨 Visual Elements</h3>
-    <ul>
-    <li><b>Orange aircraft (✈):</b> ADS-B detection (CAT021) - cooperative surveillance</li>
-    <li><b>Red aircraft (✈):</b> Radar detection (CAT048) - primary/secondary radar</li>
-    <li><b>Colored trails:</b> Each aircraft has a unique persistent trajectory with consistent color</li>
-    <li><b>Purple radar icon (𖦏):</b> Barcelona radar position (SAC: 20, SIC: 129)</li>
-    <li><b>Aircraft orientation:</b> Icon automatically rotates based on flight direction</li>
-    <li><b>Trail thickness:</b> Indicates recent movement (thicker = more recent)</li>
+    <li><b>Click on any aircraft</b> to see detailed popup with information</li>
+    <li><b>Popups persist:</b> They stay open during playback until manually closed</li>
     </ul>
 
     <h3>⌨️ Keyboard Shortcuts</h3>
@@ -250,22 +184,6 @@ class MapWidget(QWidget):
     <li><b>Space:</b> Play/Pause toggle</li>
     <li><b>← Left Arrow:</b> Skip backward 10 seconds</li>
     <li><b>→ Right Arrow:</b> Skip forward 10 seconds</li>
-    </ul>
-
-    <h3>🖱 Map Controls (2D Mode)</h3>
-    <ul>
-    <li><b>Drag:</b> Pan the map</li>
-    <li><b>Scroll:</b> Zoom in/out</li>
-    <li><b>Double-click:</b> Zoom to location</li>
-    <li><b>+/- buttons:</b> Zoom controls (top-left)</li>
-    </ul>
-
-    <h3>🖱 Map Controls (3D Mode)</h3>
-    <ul>
-    <li><b>Drag:</b> Rotate view around center point</li>
-    <li><b>Scroll:</b> Zoom in/out</li>
-    <li><b>Shift + Drag:</b> Tilt/incline camera angle</li>
-    <li><b>Ctrl + Drag:</b> Pan the map</li>
     </ul>
     """
 
@@ -333,16 +251,92 @@ class MapWidget(QWidget):
         if self.is_3d_mode:
             self.view_mode_btn.setText("🗺️ Vista 2D")
             self.heatmap_check.setEnabled(False)
+
+            self.show_separation = False #por ahora lo dejo en desactivado, cambiar en un futuro si eso.
+
             self.load_3d_map()
         else:
             self.view_mode_btn.setText("🌐 Vista 3D")
             self.heatmap_check.setEnabled(True)
             self.load_base_map()
 
+        if hasattr(self, 'view_mode_changed'):
+            self.view_mode_changed(self.is_3d_mode)
+
         if self.df is not None:
             if self.show_heatmap and not self.is_3d_mode:
                 self.generate_heatmap()
             self.update_aircraft_positions()
+
+    def set_separation_mode(self, enabled: bool):
+        """Activar/desactivar modo de separación."""
+        self.show_separation = enabled
+        if hasattr(self, 'web_view'):
+            js_code = f"if(window.setSeparationMode) setSeparationMode({str(enabled).lower()});"
+            self.web_view.page().runJavaScript(js_code)
+        self.update_aircraft_positions()
+
+    def set_departure_schedule(self, schedule):
+        """Guardar horario de despegues desde Excel."""
+        self.departure_schedule = schedule
+
+    def calculate_separation_lines(self, aircraft_list):
+        """Calcular línea entre los dos últimos despegues del Excel."""
+        if not self.show_separation or not self.departure_schedule:
+            return []
+
+        # Filtrar solo los que ya han despegado
+        departed = [
+            (callsign, time_dep)
+            for (callsign, time_dep) in self.departure_schedule
+            if time_dep <= self.current_time
+        ]
+
+        if len(departed) < 2:
+            return []
+
+        # Ordenar por tiempo y tomar los 2 últimos
+        departed_sorted = sorted(departed, key=lambda x: x[1])
+        last_two = departed_sorted[-2:]
+
+        penultimo_callsign = last_two[0][0]
+        ultimo_callsign = last_two[1][0]
+
+        # Buscar posiciones actuales en el mapa
+        live_positions = {}
+        for ac in aircraft_list:
+            raw_call = ac.get('callsign', '')
+            if raw_call:
+                clean_call = str(raw_call).strip().upper()
+                live_positions[clean_call] = ac
+
+        # Verificar que ambos estén visibles
+        if penultimo_callsign not in live_positions or ultimo_callsign not in live_positions:
+            return []
+
+        ac1 = live_positions[penultimo_callsign]
+        ac2 = live_positions[ultimo_callsign]
+
+        # Calcular distancia
+        lat1, lon1 = ac1['lat'], ac1['lon']
+        lat2, lon2 = ac2['lat'], ac2['lon']
+
+        R = 6371
+        dLat = math.radians(lat2 - lat1)
+        dLon = math.radians(lon2 - lon1)
+        a = (math.sin(dLat / 2) ** 2 +
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+             math.sin(dLon / 2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        dist_nm = (R * c) * 0.539957
+
+        return [{
+            'from_lat': lat1,
+            'from_lon': lon1,
+            'to_lat': lat2,
+            'to_lon': lon2,
+            'dist': f"{dist_nm:.1f} NM"
+        }]
 
     def load_base_map(self):
         """Load 2D Leaflet map with Barcelona as center."""
@@ -371,8 +365,48 @@ class MapWidget(QWidget):
     <body>
         <div id="map"></div>
         <script>
-            var map = L.map('map', { 
-                zoomControl: true, 
+            var separationLines = [];
+            var isSeparationMode = false;
+
+            window.setSeparationMode = function(enabled) {
+                isSeparationMode = enabled;
+                if (!enabled) {
+                    separationLines.forEach(l => map.removeLayer(l));
+                    separationLines = [];
+                    Object.values(aircraftMarkers).forEach(m => m.setOpacity(1.0));
+                }
+            };
+
+            window.drawSeparationLines = function(lines) {
+                separationLines.forEach(l => map.removeLayer(l));
+                separationLines = [];
+
+                if (!isSeparationMode) return;
+
+                lines.forEach(l => {
+                    var poly = L.polyline([[l.from_lat, l.from_lon], [l.to_lat, l.to_lon]], {
+                        color: 'red', dashArray: '5, 10', weight: 2, opacity: 0.8
+                    }).addTo(map);
+
+                    var midLat = (l.from_lat + l.to_lat) / 2;
+                    var midLon = (l.from_lon + l.to_lon) / 2;
+                    var label = L.marker([midLat, midLon], {
+                        icon: L.divIcon({
+                            className: 'sep-label',
+                            html: '<div style="background:white; border:1px solid red; padding:2px; font-size:10px; font-weight:bold;">' + l.dist + '</div>',
+                            iconSize: [50, 20]
+                        })
+                    }).addTo(map);
+
+                    separationLines.push(poly);
+                    separationLines.push(label);
+                });
+
+                Object.values(aircraftMarkers).forEach(m => m.setOpacity(0.4));
+            };
+
+            var map = L.map('map', {
+                zoomControl: true,
                 attributionControl: false,
                 closePopupOnClick: false
             }).setView([41.2972, 2.0833], 11);
@@ -478,11 +512,11 @@ class MapWidget(QWidget):
                         rotation = aircraft.lastRotation;
                     }
 
-                    var icon = L.divIcon({ 
-                        html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>', 
-                        className: 'aircraft-marker', 
-                        iconSize: [26, 26], 
-                        iconAnchor: [13, 13] 
+                    var icon = L.divIcon({
+                        html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>',
+                        className: 'aircraft-marker',
+                        iconSize: [26, 26],
+                        iconAnchor: [13, 13]
                     });
 
                     var altitudeStr = aircraft.altitude_display || 'N/A';
@@ -537,18 +571,18 @@ class MapWidget(QWidget):
                     var newPoint = [aircraft.lat, aircraft.lon];
                     var trail = aircraftTrails[trailKey];
 
-                    if (trail.length === 0 || 
-                        Math.abs(newPoint[0] - trail[trail.length-1][0]) > 0.0001 || 
+                    if (trail.length === 0 ||
+                        Math.abs(newPoint[0] - trail[trail.length-1][0]) > 0.0001 ||
                         Math.abs(newPoint[1] - trail[trail.length-1][1]) > 0.0001) {
                         trail.push(newPoint);
                     }
 
                     if (trail.length > 1) {
                         var trailColor = getAircraftColor(aircraft.address);
-                        marker.trailLine = L.polyline(trail, { 
-                            color: trailColor, 
+                        marker.trailLine = L.polyline(trail, {
+                            color: trailColor,
                             weight: 2,
-                            opacity: 0.7, 
+                            opacity: 0.7,
                             lineCap: 'round',
                             lineJoin: 'round',
                             smoothFactor: 1.0
@@ -564,8 +598,8 @@ class MapWidget(QWidget):
                     }
                     map.removeLayer(marker);
                 });
-                aircraftMarkers = {}; 
-                aircraftTrails = {}; 
+                aircraftMarkers = {};
+                aircraftTrails = {};
                 aircraftColors = {};
                 openPopups = {};
                 if (window.heatLayer) {
@@ -813,9 +847,9 @@ class MapWidget(QWidget):
                     opacity: 0.9,
                     stroked: true,
                     filled: true,
-                    radiusScale: 60,       
-                    radiusMinPixels: 4,    
-                    radiusMaxPixels: 8,     
+                    radiusScale: 60,
+                    radiusMinPixels: 4,
+                    radiusMaxPixels: 8,
                     lineWidthMinPixels: 0.5,
                     getPosition: d => [d.lon, d.lat, (d.fl || 0) * 30.48],
                     getRadius: 50,
@@ -823,22 +857,22 @@ class MapWidget(QWidget):
                     getLineColor: [255, 255, 255, 200]
                 });
 
-                const pathData = Object.entries(trailsData).map(([key, trail]) => ({ 
-                    path: trail.path, 
-                    color: trail.color 
+                const pathData = Object.entries(trailsData).map(([key, trail]) => ({
+                    path: trail.path,
+                    color: trail.color
                 }));
 
                 const pathLayer = new PathLayer({
-                    id: 'trails-layer', 
-                    data: pathData, 
-                    pickable: false, 
+                    id: 'trails-layer',
+                    data: pathData,
+                    pickable: false,
                     widthScale: 8,
                     widthMinPixels: 1,
                     jointRounded: true,
                     capRounded: true,
-                    billboard: false, 
-                    getPath: d => d.path, 
-                    getColor: d => d.color, 
+                    billboard: false,
+                    getPath: d => d.path,
+                    getColor: d => d.color,
                     getWidth: 1.5
                 });
 
@@ -886,8 +920,8 @@ class MapWidget(QWidget):
                     var newPoint = [aircraft.lon, aircraft.lat, (aircraft.fl || 0) * 30.48];
                     var trail = trailsData[trailKey].path;
 
-                    if (trail.length === 0 || 
-                        Math.abs(newPoint[0] - trail[trail.length-1][0]) > 0.0001 || 
+                    if (trail.length === 0 ||
+                        Math.abs(newPoint[0] - trail[trail.length-1][0]) > 0.0001 ||
                         Math.abs(newPoint[1] - trail[trail.length-1][1]) > 0.0001) {
                         trail.push(newPoint);
                     }
@@ -901,8 +935,8 @@ class MapWidget(QWidget):
             };
 
             window.resetTrails = function() {
-                trailsData = {}; 
-                aircraftData = []; 
+                trailsData = {};
+                aircraftData = [];
                 updateLayers();
                 closePopup();
             };
@@ -931,22 +965,6 @@ class MapWidget(QWidget):
 
         self._last_radar_by_ta = {}
 
-        try:
-            tas_series = self.df['TA'] if 'TA' in self.df.columns else None
-            cat_series = self.df['CAT'] if 'CAT' in self.df.columns else None
-            if tas_series is not None and cat_series is not None:
-                self.tas_adsb = set(tas_series[cat_series == 21].dropna().astype(str).unique())
-                self.tas_radar = set(tas_series[cat_series == 48].dropna().astype(str).unique())
-                self.tas_both = self.tas_adsb.intersection(self.tas_radar)
-            else:
-                self.tas_adsb = set()
-                self.tas_radar = set()
-                self.tas_both = set()
-        except Exception:
-            self.tas_adsb = set()
-            self.tas_radar = set()
-            self.tas_both = set()
-
         self.min_time = float(self.df['Time_sec'].min())
         self.max_time = float(self.df['Time_sec'].max())
         self.current_time = self.min_time
@@ -969,6 +987,7 @@ class MapWidget(QWidget):
         self.time_start_label.setText(self._format_hms(self.min_time))
         self.time_end_label.setText(self._format_hms(self.max_time))
         self.update_time_label()
+
         self.web_view.page().runJavaScript("resetTrails();")
         self.update_aircraft_positions()
 
@@ -1052,10 +1071,8 @@ class MapWidget(QWidget):
         """Format altitude display string."""
         if pd.notna(alt_ft):
             return f"{int(round(alt_ft))} ft"
-
         if pd.notna(fl):
             return f"FL{int(round(fl))}"
-
         return "N/A"
 
     def _get_callsign(self, adsb_row, radar_row):
@@ -1104,7 +1121,6 @@ class MapWidget(QWidget):
         tas_seen = set([str(x) for x in current_sorted['TA'].dropna().unique()])
 
         def pick_speed(r):
-            """Select best available speed measurement."""
             if r is None:
                 return None
             for col in ['GS_TVP(kt)', 'GS(kt)', 'GS_BDS(kt)']:
@@ -1123,30 +1139,15 @@ class MapWidget(QWidget):
             callsign = self._get_callsign(adsb_row, radar_row)
             mode3a = self._get_mode3a(adsb_row, radar_row)
 
-            if radar_row is not None and pd.notna(radar_row.get('LAT')) and pd.notna(radar_row.get('LON')):
-                self._last_radar_by_ta[ta] = {
-                    'lat': float(radar_row['LAT']),
-                    'lon': float(radar_row['LON']),
-                    'fl': float(radar_row['FL']) if pd.notna(radar_row.get('FL')) else None,
-                    'alt_ft': float(radar_row['H(ft)']) if pd.notna(radar_row.get('H(ft)')) else None,
-                    'time': float(radar_row['Time_sec']),
-                    'mode3a': mode3a
-                }
-
             if self.source_filter in ["both", "adsb"]:
                 if adsb_row is not None and pd.notna(adsb_row.get('LAT')) and pd.notna(adsb_row.get('LON')):
-                    altitude_display = self._format_altitude_display(
-                        adsb_row.get('FL'),
-                        adsb_row.get('H(ft)')
-                    )
-
                     aircraft_data.append({
                         'address': ta,
                         'callsign': callsign,
                         'lat': float(adsb_row['LAT']),
                         'lon': float(adsb_row['LON']),
                         'fl': float(adsb_row['FL']) if pd.notna(adsb_row.get('FL')) else None,
-                        'altitude_display': altitude_display,
+                        'altitude_display': self._format_altitude_display(adsb_row.get('FL'), adsb_row.get('H(ft)')),
                         'speed': pick_speed(adsb_row),
                         'mode3a': mode3a,
                         'cat': 21
@@ -1154,47 +1155,20 @@ class MapWidget(QWidget):
 
             if self.source_filter in ["both", "radar"]:
                 if radar_row is not None and pd.notna(radar_row.get('LAT')) and pd.notna(radar_row.get('LON')):
-                    altitude_display = self._format_altitude_display(
-                        radar_row.get('FL'),
-                        radar_row.get('H(ft)')
-                    )
-
                     aircraft_data.append({
                         'address': ta,
                         'callsign': callsign,
                         'lat': float(radar_row['LAT']),
                         'lon': float(radar_row['LON']),
                         'fl': float(radar_row['FL']) if pd.notna(radar_row.get('FL')) else None,
-                        'altitude_display': altitude_display,
+                        'altitude_display': self._format_altitude_display(radar_row.get('FL'), radar_row.get('H(ft)')),
                         'speed': pick_speed(radar_row),
                         'mode3a': mode3a,
                         'cat': 48
                     })
-                else:
-                    last = self._last_radar_by_ta.get(ta)
-                    if last is not None:
-                        altitude_display = self._format_altitude_display(
-                            last.get('fl'),
-                            last.get('alt_ft')
-                        )
-
-                        aircraft_data.append({
-                            'address': ta,
-                            'callsign': callsign,
-                            'lat': last['lat'],
-                            'lon': last['lon'],
-                            'fl': last.get('fl'),
-                            'altitude_display': altitude_display,
-                            'speed': None,
-                            'mode3a': last.get('mode3a'),
-                            'cat': 48
-                        })
 
         for aircraft in aircraft_data:
-            ta = aircraft['address']
-            cat = aircraft['cat']
-            key = f"{ta}_{cat}"
-
+            key = f"{aircraft['address']}_{aircraft['cat']}"
             if key in self._last_valid_rotation:
                 aircraft['heading'] = self._last_valid_rotation[key]
                 aircraft['lastRotation'] = self._last_valid_rotation[key]
@@ -1206,11 +1180,17 @@ class MapWidget(QWidget):
             unique_tas = set(a['address'] for a in aircraft_data)
             adsb_count = len([a for a in aircraft_data if a['cat'] == 21])
             radar_count = len([a for a in aircraft_data if a['cat'] == 48])
-
-            self.aircraft_label.setText(
-                f"Aircraft: {len(unique_tas)} (ADS-B: {adsb_count}, Radar: {radar_count})")
+            self.aircraft_label.setText(f"Aircraft: {len(unique_tas)} (ADS-B: {adsb_count}, Radar: {radar_count})")
 
             js_code = f"updateAircraft({json.dumps(aircraft_data)}, {json.dumps(self.show_labels)});"
             self.web_view.page().runJavaScript(js_code)
+
+            # Calcular y dibujar líneas de separación
+            if self.show_separation and self.departure_schedule:
+                sep_lines = self.calculate_separation_lines(aircraft_data)
+                if sep_lines:
+                    js_code = f"if(window.drawSeparationLines) drawSeparationLines({json.dumps(sep_lines)});"
+                    self.web_view.page().runJavaScript(js_code)
+
         else:
             self.aircraft_label.setText("Aircraft: 0")

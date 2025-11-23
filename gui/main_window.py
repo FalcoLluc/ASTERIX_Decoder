@@ -51,13 +51,9 @@ def process_records_chunk(records_chunk):
     import pandas as pd
 
     try:
-        # Decode records
         decoded = decode_records(records_chunk)
-
-        # Convert to DataFrame (apply_qnh=False manual control)
         df_chunk = AsterixExporter.records_to_dataframe(decoded, apply_qnh=False)
 
-        # --- INTEGRACIÓN CORRECCIÓN QNH (Requisito Evaluación) ---
         if not df_chunk.empty and 'FL' in df_chunk.columns:
             corrector = QNHCorrector()
             corrected_alts = []
@@ -70,7 +66,6 @@ def process_records_chunk(records_chunk):
                 ta = getattr(row, 'TA', None) if has_ta else None
                 bp = getattr(row, 'BP', None) if has_bp else None
 
-                # Calcular corrección (QNH o FL estandard)
                 alt_ft = corrector.correct(ta, fl, bp)
                 if alt_ft is None:
                     alt_ft = (fl * 100.0) if pd.notna(fl) else None
@@ -78,7 +73,6 @@ def process_records_chunk(records_chunk):
                 corrected_alts.append(alt_ft)
 
             df_chunk['H(ft)'] = corrected_alts
-        # ---------------------------------------------------------
 
         return df_chunk
     except Exception as e:
@@ -91,7 +85,6 @@ def process_records_chunk(records_chunk):
 # BACKGROUND THREAD WITH MULTIPROCESSING
 # ============================================================
 class ProcessingThread(QThread):
-    """Thread to read, decode, and export ASTERIX files with parallel processing."""
     finished = Signal(pd.DataFrame)
     error = Signal(str)
     progress = Signal(int, str)
@@ -177,8 +170,6 @@ class ProcessingThread(QThread):
 # MAIN WINDOW
 # ============================================================
 class AsterixGUI(QMainWindow):
-    """Main GUI window for ASTERIX Unified Decoder & Viewer with DYNAMIC filters."""
-
     def __init__(self):
         super().__init__()
         self.df_raw = None
@@ -186,7 +177,7 @@ class AsterixGUI(QMainWindow):
         self.model = None
         self.filters_dirty = False
         self.pending_filters = False
-        self.p3_callsigns = None  # Para guardar la lista del Excel
+        self.p3_callsigns = None
         self.init_ui()
 
     def init_ui(self):
@@ -207,7 +198,6 @@ class AsterixGUI(QMainWindow):
 
         self.tabs = QTabWidget()
 
-        # Tab 1: Table view
         table_widget = QWidget()
         table_layout = QVBoxLayout(table_widget)
         self.table = QTableView()
@@ -217,13 +207,12 @@ class AsterixGUI(QMainWindow):
         table_layout.addWidget(self.table)
         self.tabs.addTab(table_widget, "📋 Table View")
 
-        # Tab 2: Map view
         self.map_widget = MapWidget()
+        self.map_widget.view_mode_changed = self.on_map_view_changed
         self.tabs.addTab(self.map_widget, "🗺 Map View")
 
         layout.addWidget(self.tabs)
 
-        # Filter panels
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(self.create_category_filter_panel())
         filter_layout.addWidget(self.create_detection_filter_panel())
@@ -369,7 +358,7 @@ class AsterixGUI(QMainWindow):
         self.geo_filter_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.geo_filter_check)
 
-        # --- NEW: P3 EXCEL FILTER ---
+        # --- P3 EXCEL FILTER & SEPARATION ---
         layout.addSpacing(15)
         p3_layout = QVBoxLayout()
         p3_layout.setContentsMargins(0, 0, 0, 0)
@@ -384,9 +373,12 @@ class AsterixGUI(QMainWindow):
         self.check_p3_only.stateChanged.connect(self.on_filter_changed)
         p3_layout.addWidget(self.check_p3_only)
 
-        layout.addLayout(p3_layout)
-        # -----------------------------
+        self.check_show_separation = QCheckBox("📏 Show Separation")
+        self.check_show_separation.setEnabled(False)
+        self.check_show_separation.stateChanged.connect(self.update_map_separation)
+        p3_layout.addWidget(self.check_show_separation)
 
+        layout.addLayout(p3_layout)
         layout.addStretch()
         group.setLayout(layout)
         return group
@@ -401,21 +393,94 @@ class AsterixGUI(QMainWindow):
 
         try:
             df_excel = pd.read_excel(file_path)
+
             if 'Indicativo' not in df_excel.columns:
                 QMessageBox.warning(self, "Error", "El Excel no tiene columna 'Indicativo'.")
                 return
 
-            self.p3_callsigns = set(df_excel['Indicativo'].astype(str).str.strip().str.upper())
+            col_hora = next((c for c in df_excel.columns if 'Hora' in c or 'Time' in c or 'hora' in c), None)
+            if not col_hora:
+                QMessageBox.warning(self, "Error", "No se encuentra columna de Hora.")
+                return
+
+            # Obtener callsigns que existen en el radar
+            if self.df_raw is not None and 'TI' in self.df_raw.columns:
+                radar_callsigns = set(self.df_raw['TI'].dropna().astype(str).str.strip().str.upper())
+            else:
+                radar_callsigns = None
+
+            def parse_time(t):
+                """Parse time with Timedelta support"""
+                if pd.isna(t):
+                    return 999999
+
+                try:
+                    # Si es Timedelta (pandas)
+                    if isinstance(t, pd.Timedelta):
+                        return int(t.total_seconds())
+
+                    # Si es timedelta (Python nativo)
+                    if hasattr(t, 'total_seconds'):
+                        return int(t.total_seconds())
+
+                    # Si es string
+                    if isinstance(t, str):
+                        t = t.strip().split('.')[0]
+                        if ':' in t:
+                            parts = list(map(int, t.split(':')))
+                            if len(parts) == 3:
+                                return parts[0] * 3600 + parts[1] * 60 + parts[2]
+                            elif len(parts) == 2:
+                                return parts[0] * 60 + parts[1]
+
+                    # Si es datetime/time
+                    if hasattr(t, 'hour'):
+                        return t.hour * 3600 + t.minute * 60 + t.second
+
+                    # Si es número
+                    if isinstance(t, (int, float)):
+                        seconds = t * 86400
+                        return int(seconds)
+
+                except Exception:
+                    return 999999
+
+                return 999999
+
+            df_excel['sec'] = df_excel[col_hora].apply(parse_time)
+            df_excel['Indicativo_clean'] = df_excel['Indicativo'].astype(str).str.strip().str.upper()
+
+            # FILTRAR: Solo vuelos que existen en el radar
+            if radar_callsigns:
+                df_excel = df_excel[df_excel['Indicativo_clean'].isin(radar_callsigns)]
+
+            df_sorted = df_excel.sort_values('sec')
+
+            schedule = list(zip(
+                df_sorted['Indicativo_clean'],
+                df_sorted['sec']
+            ))
+
+            if hasattr(self, 'map_widget'):
+                self.map_widget.set_departure_schedule(schedule)
+
+            self.p3_callsigns = set(df_sorted['Indicativo_clean'])
 
             self.check_p3_only.setEnabled(True)
             self.check_p3_only.setChecked(True)
+            self.check_show_separation.setEnabled(True)
             self.btn_load_p3.setText("✅ Excel Loaded")
             self.btn_load_p3.setStyleSheet("background-color: #e8f5e9; color: #2e7d32; font-weight: bold;")
-            self.status_label.setText(f"✅ Loaded {len(self.p3_callsigns)} flights from Excel.")
+            self.status_label.setText(f"✅ Loaded {len(self.p3_callsigns)} flights from Excel (matched with radar).")
             self.on_filter_changed()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error loading Excel:\n{str(e)}")
+            import traceback
+            QMessageBox.critical(self, "Error", f"Error loading Excel:\n{str(e)}\n\n{traceback.format_exc()}")
+
+    def update_map_separation(self):
+        if hasattr(self, 'map_widget'):
+            self.map_widget.set_separation_mode(self.check_show_separation.isChecked())
 
     def on_filter_changed(self):
         if self.df_raw is None:
@@ -483,7 +548,6 @@ class AsterixGUI(QMainWindow):
         try:
             df = self.df_raw
 
-            # 1. CATEGORY
             if 'CAT' in df.columns:
                 cat_mask = np.zeros(len(df), dtype=bool)
                 if self.cat021_check.isChecked():
@@ -492,43 +556,34 @@ class AsterixGUI(QMainWindow):
                     cat_mask |= (df['CAT'].to_numpy(copy=False) == 48)
                 df = df[cat_mask]
 
-            # 2. WHITE NOISE
             if self.white_noise_check.isChecked():
                 df = AsterixFilter.filter_white_noise(df)
 
-            # 3. FIXED TRANSPONDER
             if self.fixed_transponder_check.isChecked():
                 df = AsterixFilter.filter_fixed_transponders(df)
 
-            # 4. ALTITUDE
             min_fl = self.min_fl_spin.value()
             max_fl = self.max_fl_spin.value()
             if min_fl > 0 or max_fl < 600:
                 df = AsterixFilter.filter_by_altitude(df, min_fl=min_fl, max_fl=max_fl)
 
-            # 5. AIRBORNE
             if self.airborne_check.isChecked():
                 df = AsterixFilter.filter_airborne(df)
 
-            # 6. GROUND
             if self.ground_check.isChecked():
                 df = AsterixFilter.filter_on_ground(df)
 
-            # 7. CALLSIGN
             callsign_text = self.callsign_input.text().strip()
             if callsign_text and 'TI' in df.columns:
                 df = AsterixFilter.filter_by_callsign(df, callsign_text)
 
-            # 8. SPEED
             min_speed = self.min_speed_spin.value()
             if min_speed > 0:
                 df = AsterixFilter.filter_by_speed(df, min_speed=min_speed)
 
-            # 9. GEOGRAPHIC
             if self.geo_filter_check.isChecked():
                 df = AsterixFilter.filter_by_geographic_bounds(df)
 
-            # 10. P3 EXCEL FILTER (Nuevo)
             if self.check_p3_only.isChecked() and self.p3_callsigns:
                 if 'TI' in df.columns:
                     temp_ti = df['TI'].astype(str).str.strip().str.upper()
@@ -536,14 +591,12 @@ class AsterixGUI(QMainWindow):
 
             self.df_display = df
 
-            # Logic to handle exclusive filters
             cats_in_data = set(self.df_display['CAT'].unique()) if 'CAT' in self.df_display.columns else set()
             only_cat021 = (cats_in_data == {21})
             self.airborne_check.setEnabled(not only_cat021)
             self.ground_check.setEnabled(not only_cat021)
 
             if only_cat021:
-                # ✅ FIX: Bloquear señales para evitar bucle infinito
                 self.airborne_check.blockSignals(True)
                 self.ground_check.blockSignals(True)
                 self.airborne_check.setChecked(False)
@@ -575,9 +628,10 @@ class AsterixGUI(QMainWindow):
         self.min_speed_spin.setValue(0)
         self.geo_filter_check.setChecked(True)
 
-        # Reset P3 filter
         self.check_p3_only.setChecked(False)
         self.check_p3_only.setEnabled(False)
+        self.check_show_separation.setChecked(False)
+        self.check_show_separation.setEnabled(False)
         self.p3_callsigns = None
         self.btn_load_p3.setText("📂 Load P3 Excel")
         self.btn_load_p3.setStyleSheet("")
@@ -625,6 +679,16 @@ class AsterixGUI(QMainWindow):
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def on_map_view_changed(self, is_3d: bool):
+        """Deshabilitar checkbox de separación en 3D"""
+        if hasattr(self, 'check_show_separation'):
+            if is_3d:
+                self.check_show_separation.setEnabled(False)
+                self.check_show_separation.setChecked(False)
+            else:
+                self.check_show_separation.setEnabled(bool(self.p3_callsigns))
+
 
 
 if __name__ == '__main__':
