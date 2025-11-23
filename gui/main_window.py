@@ -667,7 +667,7 @@ class AsterixGUI(QMainWindow):
         if self.df_display is None or self.df_display.empty:
             return
         map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'H(ft)',
-                       'Mode3/A', 'GS(kt)', 'GS_TVP(kt)', 'GS_BDS(kt)']
+                       'Mode3/A', 'GS_TVP(kt)', 'GS_BDS(kt)']
         available_cols = [col for col in map_columns if col in self.df_display.columns]
         if len(available_cols) < 3:
             return
