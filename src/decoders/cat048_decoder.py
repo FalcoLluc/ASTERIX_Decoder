@@ -12,6 +12,7 @@ BDS 4.0, 5.0, 6.0
 """
 
 class Cat048Decoder(AsterixDecoderBase):
+    """Decoder for ASTERIX Category 048 (radar PSR/SSR), dispatched via FSPEC map."""
     def __init__(self):
         super().__init__()
         # Initialize coordinate transformer for Barcelona radar
@@ -47,19 +48,15 @@ class Cat048Decoder(AsterixDecoderBase):
 
     def decode_record(self, record: Record) -> Record:
         """Main decoding method"""
-        # Parse FSPEC to get list of items in order
         self.logger.debug("Starting decode_record: offset=%s, raw_len=%s", getattr(record, 'block_offset', None), len(record.raw_data))
         fspec_items, data_start = self._parse_fspec(record)
         self.logger.debug("Parsed FSPEC: %d items, data_start=%d", len(fspec_items), data_start)
 
-        # Initialize pointer to data after FSPEC
         data_pointer = data_start
 
-        # Decode each item in FSPEC order
         for item_type in fspec_items:
             decoder_func = self.decoder_map.get(item_type)
             if decoder_func:
-                # Each decoder returns the new data pointer position
                 data_pointer = decoder_func(data_pointer, record)
             else:
                 self.logger.warning("No decoder for CAT048 item %s", item_type)

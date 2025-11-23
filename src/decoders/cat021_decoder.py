@@ -6,10 +6,11 @@ from typing import List
 
 
 class Cat021Decoder(AsterixDecoderBase):
+    """Decoder for ASTERIX Category 021 (ADS-B), dispatching items via FSPEC map."""
     def __init__(self):
+        """Initialize decoder map that dispatches FRNs to their decode/skip handlers."""
         super().__init__()
         self.decoder_map = {
-            # Items to decode
             CAT021ItemType.DATA_SOURCE_IDENTIFICATION: self._decode_data_source,  # FRN 1
             CAT021ItemType.TARGET_REPORT_DESCRIPTOR: self._decode_target_report_descriptor,  # FRN 2
             CAT021ItemType.POSITION_WGS84_HIGH_RES: self._decode_position_wgs84_high_res,  # FRN 7
@@ -20,7 +21,6 @@ class Cat021Decoder(AsterixDecoderBase):
             CAT021ItemType.TARGET_IDENTIFICATION: self._decode_target_identification,  # FRN 29
             CAT021ItemType.RESERVED_EXPANSION_FIELD: self._decode_reserved_expansion_field,  # FRN 48 (RE-BPS)
 
-            # Items to skip - Fixed length
             CAT021ItemType.TRACK_NUMBER: self._skip_fixed_2,
             CAT021ItemType.SERVICE_IDENTIFICATION: self._skip_fixed_1,
             CAT021ItemType.TIME_APPLICABILITY_POSITION: self._skip_fixed_3,
@@ -50,21 +50,18 @@ class Cat021Decoder(AsterixDecoderBase):
             CAT021ItemType.ACAS_RESOLUTION_ADVISORY: self._skip_fixed_7,
             CAT021ItemType.RECEIVER_ID: self._skip_fixed_1,
 
-            # Items to skip - Variable length
             CAT021ItemType.QUALITY_INDICATORS: self._skip_variable,
             CAT021ItemType.SURFACE_CAPABILITIES: self._skip_variable,
 
-            # Items to skip - Compound
             CAT021ItemType.MET_INFORMATION: self._skip_compound_met,
             CAT021ItemType.TRAJECTORY_INTENT: self._skip_compound_trajectory,
             CAT021ItemType.DATA_AGES: self._skip_compound_data_ages,
 
-            # Items to skip - Repetitive
             CAT021ItemType.MODE_S_MB_DATA: self._skip_repetitive,
         }
 
     def decode_record(self, record: Record) -> Record:
-        # general decodification method
+        """Decode a CAT021 record by parsing FSPEC and applying each item decoder."""
         self.logger.debug("Starting decode_record: offset=%s, raw_len=%s", getattr(record, 'block_offset', None),
                           len(record.raw_data))
         fspec_items, data_start = self._parse_fspec(record)
@@ -83,7 +80,7 @@ class Cat021Decoder(AsterixDecoderBase):
         return record
 
     def _parse_fspec(self, record: Record) -> tuple[List[CAT021ItemType], int]:
-        # specification parse
+        """Parse FSPEC bytes and return (present_items, data_start_offset)."""
         raw_data = record.raw_data
         fspec_items = []
         position = 0

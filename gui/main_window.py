@@ -41,10 +41,7 @@ CAT048_COLUMNS = [
 # WORKER FUNCTION (must be at module level for pickling)
 # ============================================================
 def process_records_chunk(records_chunk):
-    """
-    Worker function to decode a chunk of records in parallel.
-    Must be at module level for multiprocessing.
-    """
+    """Decode a chunk of records and return a DataFrame (used by multiprocessing)."""
     from src.utils.handlers import decode_records
     from src.exporters.asterix_exporter import AsterixExporter
     from src.utils.qnh_corrector import QNHCorrector
@@ -85,11 +82,16 @@ def process_records_chunk(records_chunk):
 # BACKGROUND THREAD WITH MULTIPROCESSING
 # ============================================================
 class ProcessingThread(QThread):
+    """Background worker to read and decode ASTERIX files with progress reporting.
+
+    Can process sequentially or using multiprocessing depending on cores.
+    """
     finished = Signal(pd.DataFrame)
     error = Signal(str)
     progress = Signal(int, str)
 
     def __init__(self, file_path, use_multiprocessing=True):
+        """Configure worker with file path and chosen processing mode."""
         super().__init__()
         self.file_path = file_path
         self.use_multiprocessing = use_multiprocessing
@@ -103,6 +105,7 @@ class ProcessingThread(QThread):
             self.n_workers = total_cores - 2
 
     def run(self):
+        """Read, decode and aggregate records, emitting progress and final DataFrame."""
         try:
             self.progress.emit(5, "Counting records...")
             reader_count = AsterixFileReader(self.file_path)
@@ -125,6 +128,7 @@ class ProcessingThread(QThread):
             self.error.emit(f"{str(e)}\n\n{traceback.format_exc()}")
 
     def _process_sequential(self, all_records, total_records):
+        """Decode records sequentially in batches, emitting progress updates."""
         self.progress.emit(15, "Processing records (single-core)...")
         BATCH_SIZE = 50000
         all_dfs = []
@@ -143,6 +147,7 @@ class ProcessingThread(QThread):
         return pd.concat(all_dfs, ignore_index=True)
 
     def _process_parallel(self, all_records, total_records):
+        """Decode records in parallel using a worker Pool, emitting progress."""
         self.progress.emit(15, f"Processing records ({self.n_workers} cores)...")
         chunk_size = max(10000, len(all_records) // (self.n_workers * 4))
         chunks = [all_records[i:i + chunk_size] for i in range(0, len(all_records), chunk_size)]
@@ -170,6 +175,7 @@ class ProcessingThread(QThread):
 # MAIN WINDOW
 # ============================================================
 class AsterixGUI(QMainWindow):
+    """Main application window: loads files, shows table/map and manages filters."""
     def __init__(self):
         super().__init__()
         self.df_raw = None
@@ -181,6 +187,7 @@ class AsterixGUI(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        """Set up menus, tabs, table view, map widget, and filter panels."""
         self.setWindowTitle("ASTERIX Unified Decoder & Viewer")
         self.setGeometry(100, 100, 1800, 1000)
 
@@ -223,6 +230,7 @@ class AsterixGUI(QMainWindow):
         layout.addWidget(self.create_custom_filter_panel())
 
     def create_menu(self):
+        """Create File menu with actions to open, export and exit."""
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
 
@@ -243,6 +251,7 @@ class AsterixGUI(QMainWindow):
         file_menu.addAction(exit_action)
 
     def create_load_toolbar(self):
+        """Build the top toolbar with load/apply/export/reset buttons."""
         layout = QHBoxLayout()
         self.load_btn = QPushButton("📁 Load ASTERIX File")
         self.load_btn.clicked.connect(self.load_file)
@@ -267,6 +276,7 @@ class AsterixGUI(QMainWindow):
         return layout
 
     def create_category_filter_panel(self):
+        """Create category filter group (CAT021/CAT048 checkboxes)."""
         group = QGroupBox("📡 ASTERIX Category")
         layout = QVBoxLayout()
         self.cat021_check = QCheckBox("CAT021 (ADS-B)")
@@ -281,6 +291,7 @@ class AsterixGUI(QMainWindow):
         return group
 
     def create_detection_filter_panel(self):
+        """Create detection filter group (noise and fixed transponder filters)."""
         group = QGroupBox("🎯 Detection")
         layout = QVBoxLayout()
         self.white_noise_check = QCheckBox("Remove White Noise (PSR-only)")
@@ -295,6 +306,7 @@ class AsterixGUI(QMainWindow):
         return group
 
     def create_altitude_filter_panel(self):
+        """Create altitude filter group with min/max FL spinners."""
         group = QGroupBox("📏 Altitude")
         layout = QVBoxLayout()
         min_layout = QHBoxLayout()
@@ -321,6 +333,7 @@ class AsterixGUI(QMainWindow):
         return group
 
     def create_status_filter_panel(self):
+        """Create status filter group (airborne/on‑ground toggles)."""
         group = QGroupBox("✈️ Status")
         layout = QVBoxLayout()
         self.airborne_check = QCheckBox("Airborne Only")
@@ -335,6 +348,7 @@ class AsterixGUI(QMainWindow):
         return group
 
     def create_custom_filter_panel(self):
+        """Create custom filters (callsign, min speed, geo bounds, P3 Excel)."""
         group = QGroupBox("🔍 Custom Filters")
         layout = QHBoxLayout()
 
@@ -479,10 +493,12 @@ class AsterixGUI(QMainWindow):
             QMessageBox.critical(self, "Error", f"Error loading Excel:\n{str(e)}\n\n{traceback.format_exc()}")
 
     def update_map_separation(self):
+        """Toggle separation visualization on the map based on checkbox state."""
         if hasattr(self, 'map_widget'):
             self.map_widget.set_separation_mode(self.check_show_separation.isChecked())
 
     def on_filter_changed(self):
+        """Mark filters as dirty and update UI hints; enable Apply button when data loaded."""
         if self.df_raw is None:
             self.pending_filters = True
             if hasattr(self, 'status_label'):
@@ -493,6 +509,7 @@ class AsterixGUI(QMainWindow):
         self.status_label.setText("⚠️ Filters changed — click 'Apply Filters' to update.")
 
     def load_file(self):
+        """Open file dialog and start background processing of selected ASTERIX file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open ASTERIX File", "", "ASTERIX Files (*.ast);;All Files (*)"
         )
@@ -509,6 +526,7 @@ class AsterixGUI(QMainWindow):
 
     @Slot(pd.DataFrame)
     def on_load_complete(self, df_raw):
+        """Handle successful load: store data, enable actions and apply filters."""
         self.df_raw = df_raw
         self.df_display = df_raw
         self.export_btn.setEnabled(True)
@@ -519,9 +537,11 @@ class AsterixGUI(QMainWindow):
 
     @Slot(str)
     def on_load_error(self, msg):
+        """Show error dialog when background loading fails."""
         QMessageBox.critical(self, "Error", f"Failed to load file:\n{msg}")
 
     def display_dataframe(self, df):
+        """Populate the QTableView with the selected columns and auto-size headers."""
         if df is None or df.empty:
             return
         cat021_selected = self.cat021_check.isChecked()
@@ -542,6 +562,7 @@ class AsterixGUI(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
     def apply_dynamic_filters(self):
+        """Apply all active filters to raw data, update table, map and status bar."""
         if self.df_raw is None:
             return
         self.setCursor(Qt.CursorShape.WaitCursor)
