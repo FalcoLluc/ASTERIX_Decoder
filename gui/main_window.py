@@ -44,7 +44,6 @@ def process_records_chunk(records_chunk):
     """Decode a chunk of records and return a DataFrame (used by multiprocessing)."""
     from src.utils.handlers import decode_records
     from src.exporters.asterix_exporter import AsterixExporter
-    from src.utils.qnh_corrector import QNHCorrector
     import pandas as pd
 
     try:

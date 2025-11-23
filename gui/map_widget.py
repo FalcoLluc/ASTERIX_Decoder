@@ -9,8 +9,10 @@ import json
 import math
 
 
+
 class MapWidget(QWidget):
     """Widget for displaying aircraft positions on 2D/3D map with trajectory tracking."""
+
 
     def __init__(self):
         super().__init__()
@@ -33,17 +35,20 @@ class MapWidget(QWidget):
 
     def _format_hms(self, seconds: float) -> str:
         """Convert seconds to HH:MM:SS format."""
+
         try:
             s = int(max(0, seconds))
             h = s // 3600
             m = (s % 3600) // 60
             sec = s % 60
             return f"{h:02d}:{m:02d}:{sec:02d}"
+
         except Exception:
             return "--:--:--"
 
     def init_ui(self):
         """Initialize user interface components."""
+
         layout = QVBoxLayout()
         self.web_view = QWebEngineView()
         layout.addWidget(self.web_view)
@@ -135,7 +140,9 @@ class MapWidget(QWidget):
 
     def show_help(self):
         """Display help dialog with all controls and features explained."""
+
         help_text = """
+        
     <h2>ASTERIX DECODER - USER GUIDE</h2>
 
     <h3>🎮 Playback Controls (Top Bar)</h3>
@@ -153,7 +160,7 @@ class MapWidget(QWidget):
     <li><b>🌐 Vista 3D / 🗺️ Vista 2D:</b> Toggle between 2D Leaflet map and 3D deck.gl visualization
       <ul style="margin-top:5px;">
       <li><i>2D Mode:</i> Traditional top-down map view with all features</li>
-      <li><i>3D Mode:</i> Perspective view with altitude-based positioning</li>
+      <li><i>3D Mode:</i> Perspective view with altitude-based positioning (separation distance in 3D)</li>
       </ul>
     </li>
     <li><b>Source Dropdown:</b> Filter which detection system to display
@@ -173,9 +180,48 @@ class MapWidget(QWidget):
     </li>
     </ul>
 
+    <h3>🔍 Filter Panel (Bottom Bar)</h3>
+    <ul>
+    <li><b>📡 ASTERIX Category:</b> Select which ASTERIX categories to display (CAT021 ADS-B / CAT048 Radar)</li>
+    <li><b>🎯 Detection:</b> Remove white noise (PSR-only) and fixed transponders (Mode 7777)</li>
+    <li><b>📏 Altitude:</b> Filter by Flight Level range (Min FL / Max FL)</li>
+    <li><b>✈️ Status:</b> Filter by aircraft status (Airborne Only / On Ground Only)</li>
+    <li><b>Callsign:</b> Filter by partial callsign match (e.g., "RYR" for Ryanair flights)</li>
+    <li><b>Min Speed:</b> Filter aircraft below specified ground speed (in knots)</li>
+    <li><b>Geographic Bounds:</b> Limit display to Barcelona TMA area</li>
+    </ul>
+
+    <h3>✈️ P3 Departure Analysis (Bottom Bar)</h3>
+    <ul>
+    <li><b>📂 Load P3 Excel:</b> Load an Excel file containing departure schedule
+      <ul style="margin-top:5px;">
+      <li>Excel must contain columns: <i>Indicativo</i> (callsign) and <i>Hora Despegue LEBL</i> (departure time)</li>
+      <li>Only flights present in both Excel and radar data will be loaded</li>
+      </ul>
+    </li>
+    <li><b>Only P3 Take-offs:</b> Show only aircraft from the loaded Excel departure list</li>
+    <li><b>📏 Show Separation:</b> Display separation line and distance between last two consecutive departures
+      <ul style="margin-top:5px;">
+      <li><i>2D Mode:</i> Horizontal distance (great circle) in Nautical Miles</li>
+      <li><i>3D Mode:</i> True 3D distance including altitude difference</li>
+      <li>Line automatically updates as aircraft depart and new flights appear</li>
+      <li>Distance calculated between current positions (real-time tracking)</li>
+      </ul>
+    </li>
+    </ul>
+
     <h3>✈️ Aircraft Information</h3>
     <ul>
-    <li><b>Click on any aircraft</b> to see detailed popup with information</li>
+    <li><b>Click on any aircraft</b> to see detailed popup with:
+      <ul style="margin-top:5px;">
+      <li>Callsign / Address</li>
+      <li>Detection source (ADS-B or Radar)</li>
+      <li>Mode 3/A code</li>
+      <li>Altitude (Flight Level or feet)</li>
+      <li>Ground speed</li>
+      </ul>
+    </li>
+    <li><b>Colored trails:</b> Each aircraft has a unique colored trajectory showing its path</li>
     <li><b>Popups persist:</b> They stay open during playback until manually closed</li>
     </ul>
 
@@ -185,11 +231,21 @@ class MapWidget(QWidget):
     <li><b>← Left Arrow:</b> Skip backward 10 seconds</li>
     <li><b>→ Right Arrow:</b> Skip forward 10 seconds</li>
     </ul>
+
+    <h3>💡 Tips</h3>
+    <ul>
+    <li>Use filters to focus on specific flights or areas of interest</li>
+    <li>Increase playback speed to quickly scan through long recordings</li>
+    <li>In 3D mode, hold Shift and drag to adjust camera pitch</li>
+    <li>Load P3 Excel before starting playback for real-time separation monitoring</li>
+    <li>Combine multiple filters for precise analysis (e.g., P3 departures + altitude range)</li>
+    </ul>
     """
+
 
         dialog = QDialog(self)
         dialog.setWindowTitle("ASTERIX DECODER - USER GUIDE")
-        dialog.resize(750, 650)
+        dialog.resize(800, 700)
 
         layout = QVBoxLayout()
 
@@ -205,27 +261,33 @@ class MapWidget(QWidget):
         dialog.setLayout(layout)
         dialog.exec()
 
+
     def toggle_labels(self, state):
         """Toggle aircraft labels on/off."""
+
         self.show_labels = (state == Qt.CheckState.Checked.value)
         if self.df is not None:
             self.update_aircraft_positions()
 
     def toggle_heatmap(self, state):
         """Toggle heatmap on/off."""
+
         self.show_heatmap = (state == Qt.CheckState.Checked.value)
         if self.show_heatmap and self.df is not None:
             self.generate_heatmap()
+
         else:
             self.web_view.page().runJavaScript(
                 "if (window.heatLayer) { map.removeLayer(window.heatLayer); window.heatLayer = null; }")
 
     def generate_heatmap(self):
         """Generate heatmap from all trajectory data."""
+
         if self.df is None or self.df.empty:
             return
 
         heatmap_data = []
+
         for _, row in self.df.iterrows():
             if pd.notna(row.get('LAT')) and pd.notna(row.get('LON')):
                 heatmap_data.append([float(row['LAT']), float(row['LON']), 0.5])
@@ -241,17 +303,20 @@ class MapWidget(QWidget):
         """Handle source filter selection change."""
         filters = ["both", "adsb", "radar"]
         self.source_filter = filters[index]
+
         if self.df is not None:
             self.web_view.page().runJavaScript("resetTrails();")
             self.update_aircraft_positions()
 
     def toggle_view_mode(self):
         """Switch between 2D and 3D map views."""
+
         self.is_3d_mode = not self.is_3d_mode
         if self.is_3d_mode:
             self.view_mode_btn.setText("🗺️ Vista 2D")
             self.heatmap_check.setEnabled(False)
             self.load_3d_map()
+
         else:
             self.view_mode_btn.setText("🌐 Vista 3D")
             self.heatmap_check.setEnabled(True)
@@ -264,6 +329,7 @@ class MapWidget(QWidget):
 
     def set_separation_mode(self, enabled: bool):
         """Activar/desactivar modo de separación."""
+
         self.show_separation = enabled
         if hasattr(self, 'web_view'):
             js_code = f"if(window.setSeparationMode) setSeparationMode({str(enabled).lower()});"
@@ -272,15 +338,18 @@ class MapWidget(QWidget):
 
     def set_departure_schedule(self, schedule):
         """Guardar horario de despegues desde Excel."""
+
         self.departure_schedule = schedule
 
     def calculate_separation_lines(self, aircraft_list):
         """Calcular línea entre los dos últimos despegues del Excel."""
+
         if not self.show_separation or not self.departure_schedule:
             return []
 
         departed = [
             (callsign, time_dep)
+
             for (callsign, time_dep) in self.departure_schedule
             if time_dep <= self.current_time
         ]
@@ -295,6 +364,7 @@ class MapWidget(QWidget):
         ultimo_callsign = last_two[1][0]
 
         live_positions = {}
+
         for ac in aircraft_list:
             raw_call = ac.get('callsign', '')
             if raw_call:
@@ -320,7 +390,7 @@ class MapWidget(QWidget):
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         dist_horizontal_km = R * c
 
-        if self.is_3d_mode:  #calculo distancia en 3D
+        if self.is_3d_mode:
 
             alt1_m = (ac1.get('fl') or 0) * 30.48
             alt2_m = (ac2.get('fl') or 0) * 30.48
@@ -352,6 +422,7 @@ class MapWidget(QWidget):
 
     def load_base_map(self):
         """Load 2D Leaflet map with Barcelona as center."""
+
         html = """
     <!DOCTYPE html>
     <html>
@@ -623,10 +694,13 @@ class MapWidget(QWidget):
     </body>
     </html>
         """
+
         self.web_view.setHtml(html)
+
 
     def load_3d_map(self):
         """Load 3D deck.gl map with terrain visualization and separation support."""
+
         html = """
     <!DOCTYPE html>
     <html>
@@ -1029,11 +1103,13 @@ class MapWidget(QWidget):
     </body>
     </html>
         """
+
         self.web_view.setHtml(html)
 
 
     def load_data(self, df: pd.DataFrame):
         """Load and prepare ASTERIX data for visualization."""
+
         if df is None or df.empty:
             self.play_btn.setEnabled(False)
             self.reset_btn.setEnabled(False)
@@ -1058,9 +1134,11 @@ class MapWidget(QWidget):
         self.time_slider.setEnabled(True)
 
         duration = self.max_time - self.min_time
+
         if duration > 3600:
             self.time_slider.setSingleStep(10)
             self.time_slider.setPageStep(60)
+
         else:
             self.time_slider.setSingleStep(1)
             self.time_slider.setPageStep(10)
@@ -1077,16 +1155,20 @@ class MapWidget(QWidget):
 
     def toggle_play(self):
         """Toggle play/pause state."""
+
         self.is_playing = not self.is_playing
+
         if self.is_playing:
             self.play_btn.setText("⏸ Pause")
             self.timer.start(1000)
+
         else:
             self.play_btn.setText("▶ Play")
             self.timer.stop()
 
     def reset_simulation(self):
         """Reset simulation to start time."""
+
         self.current_time = self.min_time
         self.is_playing = False
         self.play_btn.setText("▶ Play")
@@ -1098,6 +1180,7 @@ class MapWidget(QWidget):
 
     def skip_time(self, seconds: float):
         """Skip forward or backward in time."""
+
         if self.df is None:
             return
         self.current_time = max(self.min_time, min(self.max_time, self.current_time + seconds))
@@ -1106,11 +1189,13 @@ class MapWidget(QWidget):
 
     def on_speed_changed(self, value):
         """Update playback speed multiplier."""
+
         self.speed_multiplier = value
         self.speed_label.setText(f"{value}x")
 
     def _on_time_slider_pressed(self):
         """Handle time slider press - pause if playing."""
+
         self._user_scrubbing = True
         self._was_playing = self.is_playing
         if self.is_playing:
@@ -1120,6 +1205,7 @@ class MapWidget(QWidget):
 
     def _on_time_slider_released(self):
         """Handle time slider release - resume if was playing."""
+
         self._user_scrubbing = False
         if self._was_playing:
             self.is_playing = True
@@ -1128,6 +1214,7 @@ class MapWidget(QWidget):
 
     def _on_time_slider_changed(self, value: int):
         """Handle manual time slider changes."""
+
         if self._user_scrubbing or not hasattr(self, 'min_time'):
             v = max(self.time_slider.minimum(), min(self.time_slider.maximum(), value))
             self.current_time = float(v)
@@ -1136,15 +1223,18 @@ class MapWidget(QWidget):
 
     def update_simulation(self):
         """Advance simulation by one time step."""
+
         self.current_time += self.speed_multiplier
         if self.current_time >= self.max_time:
             self.reset_simulation()
             return
+
         self.update_time_label()
         self.update_aircraft_positions()
 
     def update_time_label(self):
         """Update time display label."""
+
         self.time_label.setText(f"Now: {self._format_hms(self.current_time)}")
         if not self._user_scrubbing and self.time_slider.isEnabled():
             self.time_slider.blockSignals(True)
@@ -1153,6 +1243,7 @@ class MapWidget(QWidget):
 
     def _format_altitude_display(self, fl, alt_ft):
         """Format altitude display string."""
+
         if pd.notna(alt_ft):
             return f"{int(round(alt_ft))} ft"
         if pd.notna(fl):
@@ -1161,22 +1252,27 @@ class MapWidget(QWidget):
 
     def _get_callsign(self, adsb_row, radar_row):
         """Safely get callsign from either source."""
+
         if adsb_row is not None and pd.notna(adsb_row.get('TI')):
             return str(adsb_row['TI'])
+
         if radar_row is not None and pd.notna(radar_row.get('TI')):
             return str(radar_row['TI'])
         return ''
 
     def _get_mode3a(self, adsb_row, radar_row):
         """Safely get Mode3/A from either source."""
+
         if adsb_row is not None and pd.notna(adsb_row.get('Mode3/A')):
             return str(adsb_row['Mode3/A'])
+
         if radar_row is not None and pd.notna(radar_row.get('Mode3/A')):
             return str(radar_row['Mode3/A'])
         return None
 
     def update_aircraft_positions(self):
         """Update aircraft markers and trajectories based on current time."""
+
         if self.df is None or self.df.empty:
             return
 
@@ -1194,6 +1290,7 @@ class MapWidget(QWidget):
 
         current_sorted = current_aircraft.sort_values('Time_sec')
         latest_by_ta_cat = {}
+
         for _, row in current_sorted.iterrows():
             ta = str(row.get('TA')) if pd.notna(row.get('TA')) else None
             cat = int(row.get('CAT')) if pd.notna(row.get('CAT')) else None
@@ -1205,8 +1302,10 @@ class MapWidget(QWidget):
         tas_seen = set([str(x) for x in current_sorted['TA'].dropna().unique()])
 
         def pick_speed(r):
+
             if r is None:
                 return None
+
             for col in ['GS_TVP(kt)', 'GS(kt)', 'GS_BDS(kt)']:
                 v = r.get(col)
                 if pd.notna(v):
@@ -1253,9 +1352,11 @@ class MapWidget(QWidget):
 
         for aircraft in aircraft_data:
             key = f"{aircraft['address']}_{aircraft['cat']}"
+
             if key in self._last_valid_rotation:
                 aircraft['heading'] = self._last_valid_rotation[key]
                 aircraft['lastRotation'] = self._last_valid_rotation[key]
+
             else:
                 aircraft['heading'] = 0
                 aircraft['lastRotation'] = 0
@@ -1269,9 +1370,9 @@ class MapWidget(QWidget):
             js_code = f"updateAircraft({json.dumps(aircraft_data)}, {json.dumps(self.show_labels)});"
             self.web_view.page().runJavaScript(js_code)
 
-            # Calcular y dibujar líneas de separación
             if self.show_separation and self.departure_schedule:
                 sep_lines = self.calculate_separation_lines(aircraft_data)
+
                 if sep_lines:
                     js_code = f"if(window.drawSeparationLines) drawSeparationLines({json.dumps(sep_lines)});"
                     self.web_view.page().runJavaScript(js_code)
