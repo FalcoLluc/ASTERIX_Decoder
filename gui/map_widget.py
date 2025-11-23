@@ -251,17 +251,11 @@ class MapWidget(QWidget):
         if self.is_3d_mode:
             self.view_mode_btn.setText("🗺️ Vista 2D")
             self.heatmap_check.setEnabled(False)
-
-            self.show_separation = False #por ahora lo dejo en desactivado, cambiar en un futuro si eso.
-
             self.load_3d_map()
         else:
             self.view_mode_btn.setText("🌐 Vista 3D")
             self.heatmap_check.setEnabled(True)
             self.load_base_map()
-
-        if hasattr(self, 'view_mode_changed'):
-            self.view_mode_changed(self.is_3d_mode)
 
         if self.df is not None:
             if self.show_heatmap and not self.is_3d_mode:
@@ -285,7 +279,6 @@ class MapWidget(QWidget):
         if not self.show_separation or not self.departure_schedule:
             return []
 
-        # Filtrar solo los que ya han despegado
         departed = [
             (callsign, time_dep)
             for (callsign, time_dep) in self.departure_schedule
@@ -295,14 +288,12 @@ class MapWidget(QWidget):
         if len(departed) < 2:
             return []
 
-        # Ordenar por tiempo y tomar los 2 últimos
         departed_sorted = sorted(departed, key=lambda x: x[1])
         last_two = departed_sorted[-2:]
 
         penultimo_callsign = last_two[0][0]
         ultimo_callsign = last_two[1][0]
 
-        # Buscar posiciones actuales en el mapa
         live_positions = {}
         for ac in aircraft_list:
             raw_call = ac.get('callsign', '')
@@ -310,16 +301,15 @@ class MapWidget(QWidget):
                 clean_call = str(raw_call).strip().upper()
                 live_positions[clean_call] = ac
 
-        # Verificar que ambos estén visibles
         if penultimo_callsign not in live_positions or ultimo_callsign not in live_positions:
             return []
 
         ac1 = live_positions[penultimo_callsign]
         ac2 = live_positions[ultimo_callsign]
 
-        # Calcular distancia
         lat1, lon1 = ac1['lat'], ac1['lon']
         lat2, lon2 = ac2['lat'], ac2['lon']
+
 
         R = 6371
         dLat = math.radians(lat2 - lat1)
@@ -328,15 +318,37 @@ class MapWidget(QWidget):
              math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
              math.sin(dLon / 2) ** 2)
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        dist_nm = (R * c) * 0.539957
+        dist_horizontal_km = R * c
+
+        if self.is_3d_mode:  #calculo distancia en 3D
+
+            alt1_m = (ac1.get('fl') or 0) * 30.48
+            alt2_m = (ac2.get('fl') or 0) * 30.48
+            dist_vertical_km = abs(alt2_m - alt1_m) / 1000
+
+            dist_3d_km = math.sqrt(dist_horizontal_km ** 2 + dist_vertical_km ** 2)
+            dist_nm = dist_3d_km * 0.539957
+            dist_label = f"{dist_nm:.1f} NM"
+
+        else:
+
+            dist_nm = dist_horizontal_km * 0.539957
+            dist_label = f"{dist_nm:.1f} NM"
 
         return [{
+
             'from_lat': lat1,
             'from_lon': lon1,
             'to_lat': lat2,
             'to_lon': lon2,
-            'dist': f"{dist_nm:.1f} NM"
+            'from_alt': (ac1.get('fl') or 0) * 30.48,
+            'to_alt': (ac2.get('fl') or 0) * 30.48,
+            'dist': dist_label,
+            'from_call': penultimo_callsign,
+            'to_call': ultimo_callsign
+
         }]
+
 
     def load_base_map(self):
         """Load 2D Leaflet map with Barcelona as center."""
@@ -614,7 +626,7 @@ class MapWidget(QWidget):
         self.web_view.setHtml(html)
 
     def load_3d_map(self):
-        """Load 3D deck.gl map with terrain visualization."""
+        """Load 3D deck.gl map with terrain visualization and separation support."""
         html = """
     <!DOCTYPE html>
     <html>
@@ -742,7 +754,7 @@ class MapWidget(QWidget):
         </div>
 
         <script>
-            const {DeckGL, ScatterplotLayer, PathLayer, ColumnLayer, TextLayer} = deck;
+            const {DeckGL, ScatterplotLayer, PathLayer, ColumnLayer, TextLayer, LineLayer} = deck;
             let aircraftData = [];
             let trailsData = {};
             let radarPosition = {lon: 2.102058, lat: 41.300702};
@@ -897,7 +909,8 @@ class MapWidget(QWidget):
                         fontFamily: 'Arial, sans-serif',
                         fontWeight: 'bold',
                         outlineWidth: 2,
-                        outlineColor: [0, 0, 0, 255]
+                        outlineColor: [0, 0, 0, 255],
+                        pickable: false
                     });
 
                     layers.push(textLayer);
@@ -941,12 +954,83 @@ class MapWidget(QWidget):
                 closePopup();
             };
 
+            // ============== FUNCIONES DE SEPARACIÓN 3D ==============
+            window.setSeparationMode = function(enabled) {
+                if (!enabled) {
+                    const currentLayers = deckgl.props.layers.filter(l => 
+                        l.id !== 'separation-line' && l.id !== 'separation-label'
+                    );
+                    deckgl.setProps({ layers: currentLayers });
+                }
+            };
+
+            window.drawSeparationLines = function(lines) {
+                if (!lines || lines.length === 0) {
+                    window.setSeparationMode(false);
+                    return;
+                }
+
+                const line = lines[0];
+
+                // Línea 3D más fina y discreta
+                const sepLineLayer = new LineLayer({
+                    id: 'separation-line',
+                    data: [{
+                        from: [line.from_lon, line.from_lat, line.from_alt],
+                        to: [line.to_lon, line.to_lat, line.to_alt]
+                    }],
+                    getSourcePosition: d => d.from,
+                    getTargetPosition: d => d.to,
+                    getColor: [255, 0, 0, 200],
+                    getWidth: 2,
+                    widthMinPixels: 1,
+                    pickable: false
+                });
+
+                // Etiqueta más pequeña y discreta
+                const midLon = (line.from_lon + line.to_lon) / 2;
+                const midLat = (line.from_lat + line.to_lat) / 2;
+                const midAlt = (line.from_alt + line.to_alt) / 2;
+
+                const textLayer = new TextLayer({
+                    id: 'separation-label',
+                    data: [{
+                        position: [midLon, midLat, midAlt + 200],
+                        text: line.dist
+                    }],
+                    getPosition: d => d.position,
+                    getText: d => d.text,
+                    getSize: 12,
+                    getColor: [255, 0, 0, 255],
+                    getAngle: 0,
+                    getTextAnchor: 'middle',
+                    getAlignmentBaseline: 'center',
+                    billboard: true,
+                    backgroundColor: [255, 255, 255, 200],
+                    fontFamily: 'Arial, sans-serif',
+                    fontWeight: 'normal',
+                    outlineWidth: 1,
+                    outlineColor: [255, 0, 0, 200],
+                    pickable: false
+                });
+
+                // Actualizar capas
+                const currentLayers = deckgl.props.layers.filter(l => 
+                    l.id !== 'separation-line' && l.id !== 'separation-label'
+                );
+
+                deckgl.setProps({
+                    layers: [...currentLayers, sepLineLayer, textLayer]
+                });
+            };
+
             updateLayers();
         </script>
     </body>
     </html>
         """
         self.web_view.setHtml(html)
+
 
     def load_data(self, df: pd.DataFrame):
         """Load and prepare ASTERIX data for visualization."""

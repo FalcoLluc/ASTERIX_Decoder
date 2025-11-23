@@ -372,7 +372,6 @@ class AsterixGUI(QMainWindow):
         self.geo_filter_check.stateChanged.connect(self.on_filter_changed)
         layout.addWidget(self.geo_filter_check)
 
-        # --- P3 EXCEL FILTER & SEPARATION ---
         layout.addSpacing(15)
         p3_layout = QVBoxLayout()
         p3_layout.setContentsMargins(0, 0, 0, 0)
