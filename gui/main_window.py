@@ -20,14 +20,14 @@ from src.utils.asterix_filter import AsterixFilter
 # ============================================================
 CAT021_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
-    'LAT', 'LON', 'H(m)', 'H(ft)',
+    'Mode3/A','LAT', 'LON', 'H(m)', 'H(ft)',
     'FL', 'TA', 'TI', 'BP', 'SIM', 'TST',
     'ATP', 'ARC', 'RC', 'DCR', 'GBS',
 ]
 
 CAT048_COLUMNS = [
     'CAT', 'SAC', 'SIC', 'Time', 'Time_sec',
-    'RHO', 'THETA', 'LAT', 'LON', 'H_WGS84',
+    'Mode3/A','RHO', 'THETA', 'LAT', 'LON', 'H_WGS84',
     'FL', 'TA', 'TI',
     'TN', 'GS_TVP(kt)', 'GS_BDS(kt)', 'HDG',
     'TYP', 'SIM', 'RDP', 'SPI', 'RAB',
