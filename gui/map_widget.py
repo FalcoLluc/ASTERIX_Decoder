@@ -22,6 +22,7 @@ class MapWidget(QWidget):
         self.max_time = 0
         self.is_playing = False
         self.speed_multiplier = 1.0
+        self.base_time_increment = 1.0
         self._user_scrubbing = False
         self._was_playing = False
         self.is_3d_mode = False
@@ -1160,11 +1161,27 @@ class MapWidget(QWidget):
 
         if self.is_playing:
             self.play_btn.setText("⏸ Pause")
-            self.timer.start(1000)
-
+            interval_ms = self._calculate_timer_interval()
+            self.timer.start(interval_ms)
         else:
             self.play_btn.setText("▶ Play")
             self.timer.stop()
+
+    def _calculate_timer_interval(self) -> int:
+        """Calculate timer interval in milliseconds based on speed multiplier.
+
+        At 1x speed: 1000ms (1 plot per second)
+        At 10x speed: 100ms (10 plots per second)
+        At 60x speed: 17ms (60 plots per second, ~60fps)
+        """
+        # Base: 1000ms for 1x speed
+        # Formula: interval = 1000 / speed_multiplier
+        interval_ms = int(1000.0 / self.speed_multiplier)
+
+        # Clamp to reasonable bounds
+        # Min: 16ms (~60fps max)
+        # Max: 1000ms (1fps)
+        return max(16, min(1000, interval_ms))
 
     def reset_simulation(self):
         """Reset simulation to start time."""
@@ -1193,10 +1210,14 @@ class MapWidget(QWidget):
         self.update_aircraft_positions()
 
     def on_speed_changed(self, value):
-        """Update playback speed multiplier."""
-
+        """Update playback speed multiplier and restart timer if playing."""
         self.speed_multiplier = value
         self.speed_label.setText(f"{value}x")
+
+        # ✅ If playing, restart timer with new interval
+        if self.is_playing:
+            interval_ms = self._calculate_timer_interval()
+            self.timer.start(interval_ms)
 
     def _on_time_slider_pressed(self):
         """Handle time slider press - pause if playing."""
@@ -1227,15 +1248,17 @@ class MapWidget(QWidget):
             self.update_aircraft_positions()
 
     def update_simulation(self):
-        """Advance simulation by one time step."""
+        """Advance simulation by one time step (always 1 second)."""
+        # ✅ Always increment by 1 second (smooth animation)
+        self.current_time += self.base_time_increment
 
-        self.current_time += self.speed_multiplier
         if self.current_time >= self.max_time:
             self.reset_simulation()
             return
 
         self.update_time_label()
         self.update_aircraft_positions()
+
 
     def update_time_label(self):
         """Update time display label."""
