@@ -7,7 +7,7 @@ ASTERIX decoder and viewer for Category 021 (ADS-B) and Category 048 (Radar) avi
 This system provides comprehensive capabilities for processing aviation surveillance data:
 - Binary `.ast` file parsing and ASTERIX record extraction
 - Category-specific decoding with FSPEC-based item parsing for CAT021 and CAT048
-- Data export to pandas DataFrames and CSV files with 47-column unified schema
+- Data export to pandas DataFrames and CSV files
 - Comprehensive filtering (geographic, altitude, detection type, callsign, speed)
 - Dual operational modes: CLI for batch processing and GUI for interactive analysis
 - Interactive 2D/3D aircraft visualization with temporal playback controls
