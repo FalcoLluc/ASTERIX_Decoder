@@ -1,155 +1,146 @@
 # ASTERIX Decoder
 
-Unified ASTERIX (EUROCONTROL) decoder and viewer for Category 021 (ADS-B) and Category 048 (Primary/Secondary Radar).
+ASTERIX decoder and viewer for Category 021 (ADS-B) and Category 048 (Radar) aviation surveillance data.
 
-This repository provides:
-- A command‑line pipeline to read .ast files, decode CAT021/CAT048, export to pandas, filter, and write CSV.
-- A desktop GUI (PySide6/Qt) to load files, filter interactively, view data in a table, and visualize aircraft on a Leaflet map.
-- Minimal tests around the ASTERIX file reader.
+## Purpose
 
+This system provides comprehensive capabilities for processing aviation surveillance data:
+- Binary `.ast` file parsing and ASTERIX record extraction
+- Category-specific decoding with FSPEC-based item parsing for CAT021 and CAT048
+- Data export to pandas DataFrames and CSV files with 47-column unified schema
+- Comprehensive filtering (geographic, altitude, detection type, callsign, speed)
+- Dual operational modes: CLI for batch processing and GUI for interactive analysis
+- Interactive 2D/3D aircraft visualization with temporal playback controls
 
-## Stack
-- Language: Python
-- Frameworks/Libraries: PySide6 (Qt for Python, incl. QtWebEngine), pandas, numpy
-- Testing: pytest
-- Package manager: pip (requirements.txt)
+## Main Components
 
-TODO:
-- Confirm supported Python versions (inferred >=3.9 due to dependencies; please verify your target version).
-- Add packaging/entry points if distribution is desired.
+### Core Decoding Engine
+- **AsterixFileReader**: Parses binary `.ast` files, extracts ASTERIX blocks and records
+- **Cat021Decoder**: Handles ADS-B record decoding with FSPEC parsing
+- **Cat048Decoder**: Processes radar records including Mode S BDS registers (4.0/5.0/6.0) 
+- **decode_records()**: Routes records to appropriate decoder based on category
 
+### Data Processing Layer
+- **AsterixExporter**: Converts decoded records to pandas DataFrame with memory optimization
+- **AsterixFilter**: Provides filtering by geographic bounds, altitude, detection type, callsign, and speed
+- **QNHCorrector**: Applies barometric pressure correction for flights below transition altitude 
+- **CoordinateTransformer**: Converts radar polar coordinates to WGS-84 latitude/longitude
 
-## Project structure
-```
-ASTERIX_Decoder/
-├─ data/
-│  ├─ output/
-│  │  ├─ asterix_processed.csv
-│  │  └─ asterix_raw_unfiltered.csv
-│  └─ samples/
-│     ├─ datos_asterix_adsb.ast
-│     ├─ datos_asterix_combinado.ast
-│     └─ datos_asterix_radar.ast
-├─ gui/
-│  ├─ __init__.py
-│  ├─ main_window.py        # GUI entry point (PySide6)
-│  ├─ map_widget.py         # Map visualization using Leaflet in QtWebEngine
-│  └─ pandas_model.py       # Qt model for displaying pandas DataFrames
-├─ src/
-│  ├─ __init__.py
-│  ├─ main.py               # CLI/demo entry point
-│  ├─ decoders/
-│  │  ├─ asterix_decoder_base.py
-│  │  ├─ asterix_file_reader.py
-│  │  ├─ cat021_decoder.py
-│  │  └─ cat048_decoder.py
-│  ├─ exporters/
-│  │  └─ asterix_exporter.py
-│  ├─ models/
-│  │  ├─ item.py
-│  │  └─ record.py
-│  ├─ types/
-│  │  └─ enums.py
-│  └─ utils/
-│     ├─ asterix_filter.py
-│     ├─ coordinate_transformer.py
-│     ├─ handlers.py
-│     └─ qnh_corrector.py
-├─ tests/
-│  ├─ __init__.py
-│  └─ test_asterix_file_reader.py
-├─ requirements.txt
-└─ README.md
-```
+### GUI Application
+- **AsterixGUI**: Main window with tabbed interface (table/map views) and comprehensive filter panels
+- **MapWidget**: Interactive visualization using Leaflet.js (2D) and deck.gl (3D) via QWebEngineView
+- **ProcessingThread**: Background processing with multiprocessing Pool for responsive UI
 
+## ASTERIX Category Data Items
 
-## Requirements
-- Python: TODO confirm version (likely 3.10–3.12; PySide6 6.10 supports modern Python versions)
-- OS: Windows, macOS, or Linux
-- Pip and a virtual environment tool (venv or conda)
+The system supports two ASTERIX categories, each with specific data items that can be selectively filtered:
 
-Dependencies are listed in requirements.txt, including:
-- PySide6==6.10.0 (Qt for Python, incl. shiboken6 and WebEngine)
-- pandas, numpy
-- pytest (for tests)
+| Column        | Description                                                      | CAT021 | CAT048 |
+|---------------|------------------------------------------------------------------|:------:|:------:|
+| CAT           | ASTERIX Category (21=ADS-B, 48=Radar)                            |   ✔    |   ✔    |
+| SAC           | System Area Code                                                 |   ✔    |   ✔    |
+| SIC           | System Identification Code                                       |   ✔    |   ✔    |
+| Time          | Time of day (HH:MM:SS.mmm)                                       |   ✔    |   ✔    |
+| Time_sec      | Time in seconds from midnight                                    |   ✔    |   ✔    |
+| LAT           | Latitude (degrees)                                               |   ✔    |   ✔    |
+| LON           | Longitude (degrees)                                              |   ✔    |   ✔    |
+| H_WGS84       | WGS-84 ellipsoidal height (m) (radar only)                      |        |   ✔    |
+| H(m)          | Height in meters, QNH-corrected                                  |   ✔    |   ✔    |
+| H(ft)         | Height in feet, QNH-corrected                                    |   ✔    |   ✔    |
+| RHO           | Slant range (NM, radar only)                                     |        |   ✔    |
+| THETA         | Azimuth angle (degrees, radar only)                              |        |   ✔    |
+| Mode3/A       | Mode 3/A code (octal)                                            |   ✔    |   ✔    |
+| FL            | Flight level (hundreds of feet)                                  |   ✔    |   ✔    |
+| TA            | Target Address (24-bit ICAO, hex)                                |   ✔    |   ✔    |
+| TI            | Target Identification (callsign)                                 |   ✔    |   ✔    |
+| BP            | Barometric Pressure (hPa)                                        |   ✔    |   ✔    |
+| ModeS         | BDS registers present (space-separated)                          |        |   ✔    |
+| RA            | Roll Angle (deg, BDS 5.0)                                        |        |   ✔    |
+| TTA           | True Track Angle (deg, BDS 5.0)                                  |        |   ✔    |
+| GS_TVP(kt)    | Ground Speed (kt, radar)                                         |        |   ✔    |
+| GS_BDS(kt)    | Ground Speed (kt, aircraft Mode S)                               |        |   ✔    |
+| TAR           | Track Angle Rate (deg/s)                                         |        |   ✔    |
+| TAS           | True Airspeed (kt, BDS 5.0)                                      |        |   ✔    |
+| HDG           | Heading (deg, radar)                                             |        |   ✔    |
+| MG_HDG        | Magnetic Heading (deg, BDS 6.0)                                  |        |   ✔    |
+| IAS           | Indicated Airspeed (kt, BDS 6.0)                                 |        |   ✔    |
+| MACH          | Mach Number (BDS 6.0)                                            |        |   ✔    |
+| BAR           | Barometric Altitude Rate (ft/min, BDS 6.0)                       |        |   ✔    |
+| IVV           | Inertial Vertical Velocity (ft/min, BDS 6.0)                     |        |   ✔    |
+| TN            | Track Number                                                     |        |   ✔    |
+| TST           | Test Target                                                      |   ✔    |   ✔    |
+| TYP           | Detection type                                                   |        |   ✔    |
+| SIM           | Simulated target indicator (0/1)                                 |   ✔    |   ✔    |
+| RDP           | RDP Chain                                                        |        |   ✔    |
+| SPI           | Special Position Identification (0/1)                            |   ✔    |   ✔    |
+| RAB           | Report from field monitor (0/1)                                  |   ✔    |   ✔    |
+| ATP           | Address Type (CAT021 only)                                       |   ✔    |        |
+| ARC           | Altitude Reporting Capability (CAT021 only)                      |   ✔    |        |
+| RC            | Range Check (CAT021 only)                                        |   ✔    |        |
+| DCR           | Differential Correction (CAT021 only)                            |   ✔    |        |
+| GBS           | Ground Bit Set (CAT021 only)                                     |   ✔    |        |
+| STAT_code     | Status code - COM/ACAS                                           |   ✔    |   ✔    |
+| STAT          | Status description - COM/ACAS                                    |   ✔    |   ✔    |
 
+> Not all columns will be present for every record—fields depend on category and detailed report content.
 
-## Installation
-1) Clone the repository and move into the project root:
-   git clone <your-fork-or-origin-url>
-   cd ASTERIX_Decoder
+### Category Filtering
+You can filter data to show only specific categories using the GUI filter panels:
+- **CAT021 (ADS-B)**: Shows aircraft position broadcasts from aircraft transponders
+- **CAT048 (Radar)**: Shows primary/secondary radar detections from ground stations
+- **Both**: Displays combined surveillance data for comprehensive analysis
 
-2) Create and activate a virtual environment (example with venv):
-   python -m venv .venv
-   # Windows
-   .venv\\Scripts\\activate
-   # macOS/Linux
-   source .venv/bin/activate
+## Main Technologies
 
-3) Install dependencies:
-   pip install -r requirements.txt
+| Layer | Technology | Usage |
+|-------|------------|-------|
+| **Language** | Python | Core implementation |
+| **GUI Framework** | PySide6 | Qt-based desktop interface with WebEngine |
+| **Data Processing** | pandas | DataFrame operations, CSV export |
+| **Data Processing** | numpy | Numerical operations, filtering |
+| **Web Mapping** | Leaflet.js | 2D map visualization embedded in Qt |
+| **Web Mapping** | deck.gl | 3D WebGL visualization |
+| **Excel Integration** | openpyxl | P3 departure schedule loading |
 
+## Performance Architecture
 
-## Running
-There are two main ways to run the project: CLI pipeline and GUI.
+### Batch Processing
+The system processes large ASTERIX files efficiently using batch processing:
+- **Sequential Mode**: Processes 50,000-record batches in single-core mode
+- **Parallel Mode**: Divides records into optimal chunks (10,000+ records) for multiprocessing
 
-- CLI entry point (from project root):
-  python -m src.main
-  # or
-  python src/main.py
+### Multiprocessing
+Leverages multiple CPU cores for accelerated decoding:
+- **Worker Pool**: Uses `multiprocessing.Pool` with dynamic worker allocation 
+- **Core Optimization**: Allocates `cpu_count() - 2` workers for systems with >4 cores, or `cpu_count() - 1` for simpler systems
+- **Parallel Execution**: Processes chunks simultaneously using `imap_unordered()`
 
-  This will read a sample .ast file from data/samples, decode it, apply filters, and write CSV outputs to data/output.
+## Quick Guide
 
-- GUI entry point (desktop app):
-  python -m gui.main_window
-  # or
-  python gui/main_window.py
+### Running the Application
 
-  Use the GUI to load .ast files, inspect the table, filter results, export CSV, and view aircraft on a map.
+#### GUI Mode (Interactive Analysis)
 
-Note: The GUI uses QtWebEngine for the embedded map. On some Linux environments you may need additional system packages. If you encounter WebEngine errors, please consult PySide6/QtWebEngine platform notes.
+Opens desktop application with:
+- **File Loading**: Use File → Open ASTERIX File or toolbar button
+- **Table View**: Inspect decoded data in sortable table
+- **Map View**: Interactive 2D/3D visualization with playback controls
+- **Filtering**: Apply category, altitude, geographic, and custom filters
+- **Export**: Save filtered data as CSV
 
+### Basic Workflow
 
-## Scripts and common commands
-There is no packaging or script runner configured. Use these commands directly:
-- Run CLI pipeline: python -m src.main
-- Run GUI: python -m gui.main_window
-- Run tests: pytest -q
-- Lint/format: TODO add tools (e.g., ruff/black) if desired
+1. **Load Data**: Open `.ast` file containing CAT021/CAT048 records
+2. **Apply Filters**: Use filter panels to focus on specific flights or areas
+3. **Analyze**: View data in table or visualize on map with temporal playback
+4. **Export**: Save filtered results to CSV for further analysis
 
+### Key Features
 
-## Environment variables
-No mandatory environment variables are required for basic usage.
-
-Optional/TODO:
-- Add variables for input/output paths if you want to parameterize src/main.py behavior.
-- Add configuration for map defaults if needed.
-
-
-## Data, inputs, and outputs
-- Sample inputs: data/samples/*.ast
-- Default output directory: data/output/
-  - asterix_processed.csv (filtered/processed)
-  - asterix_raw_unfiltered.csv (when exporting from GUI)
-
-You can also export custom CSVs from the GUI via the Export button.
-
-
-## Testing
-Run tests with pytest from the project root:
-  pytest -q
-
-Current tests focus on the ASTERIX file reader. Feel free to expand test coverage for decoders, exporters, and filters.
-
-
-## Known limitations / TODOs
-- Confirm supported Python versions and platform-specific notes for PySide6 WebEngine.
-- Add CLI arguments to src/main.py to choose input/output paths and filters.
-- Add continuous integration and style/typing checks.
-- Expand unit tests for decoders (CAT021/CAT048) and utilities.
-- Add packaging (pyproject.toml) and console scripts if distribution is needed.
-- Provide documentation on ASTERIX field mapping and any QNH correction details.
-
-
-## License
-TODO: Add a LICENSE file and specify the license here (e.g., MIT, Apache-2.0).
+- **Dual Visualization**: Toggle between 2D Leaflet map and 3D view
+- **Temporal Playback**: Control simulation speed and scrub through timeline
+- **P3 Integration**: Load Excel departure schedules for separation analysis and departures filtering
+- **Real-time Filtering**: Apply filters dynamically without reloading data
+- **Memory Optimization**: Efficient processing of large files via chunking and dtype downcasting
+- **Category Filtering**: Show only CAT021, CAT048, or combined data sources
+- **Parallel Processing**: Utilize multiple CPU cores for faster decoding of large files
