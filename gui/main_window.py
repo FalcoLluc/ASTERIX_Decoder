@@ -468,7 +468,6 @@ class AsterixGUI(QMainWindow):
             df_excel['sec'] = df_excel[col_hora].apply(parse_time)
             df_excel['Indicativo_clean'] = df_excel['Indicativo'].astype(str).str.strip().str.upper()
 
-            # FILTRAR: Solo vuelos que existen en el radar
             if radar_callsigns:
                 df_excel = df_excel[df_excel['Indicativo_clean'].isin(radar_callsigns)]
 

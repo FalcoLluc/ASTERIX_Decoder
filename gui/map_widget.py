@@ -8,7 +8,19 @@ import pandas as pd
 import json
 import math
 
+#VALORES DISTANCIA p3 (Código adaptado a lo de los compañeros del p3)
+# Constantes de proyección
+TMA_CENTER_LAT = 41 + 6/60 + 56.560/3600  # 41°06'56.560"N
+TMA_CENTER_LON = 1 + 41/60 + 33.010/3600  # 1°41'33.010"E
+RADIO_ESFERA_CONFORME_NM = 3438.954
 
+def geodetic_to_conformal_lat(lat_rad: float) -> float:
+    e = 0.0818191908426
+    sin_lat = math.sin(lat_rad)
+    term1 = ((1 - e * sin_lat) / (1 + e * sin_lat)) ** (e / 2)
+    term2 = math.tan(math.pi / 4 + lat_rad / 2)
+    chi = 2 * math.atan(term1 * term2) - math.pi / 2
+    return chi
 
 class MapWidget(QWidget):
     """Widget for displaying aircraft positions on 2D/3D map with trajectory tracking."""
@@ -350,7 +362,6 @@ class MapWidget(QWidget):
 
         departed = [
             (callsign, time_dep)
-
             for (callsign, time_dep) in self.departure_schedule
             if time_dep <= self.current_time
         ]
@@ -381,33 +392,49 @@ class MapWidget(QWidget):
         lat1, lon1 = ac1['lat'], ac1['lon']
         lat2, lon2 = ac2['lat'], ac2['lon']
 
+        try:
+            lat0_rad = math.radians(TMA_CENTER_LAT)
+            lon0_rad = math.radians(TMA_CENTER_LON)
+            chi0 = geodetic_to_conformal_lat(lat0_rad)
 
-        R = 6371
-        dLat = math.radians(lat2 - lat1)
-        dLon = math.radians(lon2 - lon1)
-        a = (math.sin(dLat / 2) ** 2 +
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-             math.sin(dLon / 2) ** 2)
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        dist_horizontal_km = R * c
+            lat1_rad = math.radians(lat1)
+            lon1_rad = math.radians(lon1)
+            chi1 = geodetic_to_conformal_lat(lat1_rad)
+            dlon1 = lon1_rad - lon0_rad
+            denominator1 = 1 + math.sin(chi0) * math.sin(chi1) + math.cos(chi0) * math.cos(chi1) * math.cos(dlon1)
+            if abs(denominator1) < 1e-10:
+                return []
+            k1 = (2 * RADIO_ESFERA_CONFORME_NM) / denominator1
+            x1 = k1 * math.cos(chi1) * math.sin(dlon1)
+            y1 = k1 * (math.cos(chi0) * math.sin(chi1) - math.sin(chi0) * math.cos(chi1) * math.cos(dlon1))
+
+            lat2_rad = math.radians(lat2)
+            lon2_rad = math.radians(lon2)
+            chi2 = geodetic_to_conformal_lat(lat2_rad)
+            dlon2 = lon2_rad - lon0_rad
+            denominator2 = 1 + math.sin(chi0) * math.sin(chi2) + math.cos(chi0) * math.cos(chi2) * math.cos(dlon2)
+            if abs(denominator2) < 1e-10:
+                return []
+            k2 = (2 * RADIO_ESFERA_CONFORME_NM) / denominator2
+            x2 = k2 * math.cos(chi2) * math.sin(dlon2)
+            y2 = k2 * (math.cos(chi0) * math.sin(chi2) - math.sin(chi0) * math.cos(chi2) * math.cos(dlon2))
+
+            dist_horizontal_nm = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        except:
+            return []
 
         if self.is_3d_mode:
-
             alt1_m = (ac1.get('fl') or 0) * 30.48
             alt2_m = (ac2.get('fl') or 0) * 30.48
             dist_vertical_km = abs(alt2_m - alt1_m) / 1000
-
-            dist_3d_km = math.sqrt(dist_horizontal_km ** 2 + dist_vertical_km ** 2)
+            dist_3d_km = math.sqrt(dist_horizontal_nm ** 2 / (0.539957 ** 2) + dist_vertical_km ** 2)
             dist_nm = dist_3d_km * 0.539957
             dist_label = f"{dist_nm:.1f} NM"
-
         else:
-
-            dist_nm = dist_horizontal_km * 0.539957
+            dist_nm = dist_horizontal_nm
             dist_label = f"{dist_nm:.1f} NM"
 
         return [{
-
             'from_lat': lat1,
             'from_lon': lon1,
             'to_lat': lat2,
@@ -417,7 +444,6 @@ class MapWidget(QWidget):
             'dist': dist_label,
             'from_call': penultimo_callsign,
             'to_call': ultimo_callsign
-
         }]
 
     def load_base_map(self):
@@ -1262,7 +1288,6 @@ class MapWidget(QWidget):
         self.speed_multiplier = value
         self.speed_label.setText(f"{value}x")
 
-        # ✅ If playing, restart timer with new interval
         if self.is_playing:
             interval_ms = self._calculate_timer_interval()
             self.timer.start(interval_ms)
@@ -1297,7 +1322,6 @@ class MapWidget(QWidget):
 
     def update_simulation(self):
         """Advance simulation by one time step (always 1 second)."""
-        # ✅ Always increment by 1 second (smooth animation)
         self.current_time += self.base_time_increment
 
         if self.current_time >= self.max_time:
