@@ -60,88 +60,112 @@ class MapWidget(QWidget):
             return "--:--:--"
 
     def init_ui(self):
-        """Initialize user interface components."""
-
+        """Initialize user interface components with improved layout."""
         layout = QVBoxLayout()
         self.web_view = QWebEngineView()
         layout.addWidget(self.web_view)
 
-        control_layout = QHBoxLayout()
+        # ============ ROW 1: View Controls ============
+        view_controls_layout = QHBoxLayout()
 
         self.view_mode_btn = QPushButton("🌐 Vista 3D")
         self.view_mode_btn.clicked.connect(self.toggle_view_mode)
-        control_layout.addWidget(self.view_mode_btn)
+        view_controls_layout.addWidget(self.view_mode_btn)
 
-        control_layout.addWidget(QLabel("Source:"))
+        view_controls_layout.addWidget(QLabel("Source:"))
         self.source_combo = QComboBox()
         self.source_combo.addItems(["Both", "ADS-B Only", "Radar Only"])
         self.source_combo.currentIndexChanged.connect(self.on_source_filter_changed)
-        control_layout.addWidget(self.source_combo)
+        view_controls_layout.addWidget(self.source_combo)
 
         self.labels_check = QCheckBox("Show Labels")
         self.labels_check.setChecked(False)
         self.labels_check.stateChanged.connect(self.toggle_labels)
-        control_layout.addWidget(self.labels_check)
+        view_controls_layout.addWidget(self.labels_check)
 
         self.heatmap_check = QCheckBox("Heat Map")
         self.heatmap_check.setChecked(False)
         self.heatmap_check.stateChanged.connect(self.toggle_heatmap)
-        control_layout.addWidget(self.heatmap_check)
+        view_controls_layout.addWidget(self.heatmap_check)
 
+        view_controls_layout.addStretch()
+
+        self.aircraft_label = QLabel("Aircraft: 0")
+        view_controls_layout.addWidget(self.aircraft_label)
+
+        self.help_btn = QPushButton("❓ Help")
+        self.help_btn.clicked.connect(self.show_help)
+        view_controls_layout.addWidget(self.help_btn)
+
+        layout.addLayout(view_controls_layout)
+
+        # ============ ROW 2: Playback Controls + Time Slider ============
+        playback_layout = QHBoxLayout()
+
+        # Play/Reset buttons
         self.play_btn = QPushButton("▶ Play")
         self.play_btn.clicked.connect(self.toggle_play)
         self.play_btn.setEnabled(False)
-        control_layout.addWidget(self.play_btn)
+        self.play_btn.setFixedWidth(70)
+        playback_layout.addWidget(self.play_btn)
 
-        self.reset_btn = QPushButton("🔄 Reset")
+        self.reset_btn = QPushButton("🔄")
+        self.reset_btn.setToolTip("Reset to start")
         self.reset_btn.clicked.connect(self.reset_simulation)
         self.reset_btn.setEnabled(False)
-        control_layout.addWidget(self.reset_btn)
+        self.reset_btn.setFixedWidth(35)
+        playback_layout.addWidget(self.reset_btn)
 
-        control_layout.addWidget(QLabel("Speed:"))
+        playback_layout.addSpacing(10)
+
+        # Speed slider (compact)
+        playback_layout.addWidget(QLabel("Speed:"))
         self.speed_slider = QSlider()
         self.speed_slider.setOrientation(Qt.Horizontal)
         self.speed_slider.setMinimum(1)
-        self.speed_slider.setMaximum(60)
+        self.speed_slider.setMaximum(50)
         self.speed_slider.setValue(1)
+        self.speed_slider.setFixedWidth(100)
         self.speed_slider.valueChanged.connect(self.on_speed_changed)
-        control_layout.addWidget(self.speed_slider)
+        playback_layout.addWidget(self.speed_slider)
 
         self.speed_label = QLabel("1x")
-        control_layout.addWidget(self.speed_label)
+        self.speed_label.setMinimumWidth(30)
+        playback_layout.addWidget(self.speed_label)
 
-        control_layout.addWidget(QLabel("Time:"))
+        playback_layout.addSpacing(15)
+
+        # Current time display
+        self.time_label = QLabel("Now: --:--:--")
+        self.time_label.setMinimumWidth(110)
+        playback_layout.addWidget(self.time_label)
+
+        playback_layout.addSpacing(15)
+
         self.time_start_label = QLabel("--:--:--")
-        control_layout.addWidget(self.time_start_label)
+        self.time_start_label.setMinimumWidth(60)
+        playback_layout.addWidget(self.time_start_label)
 
         self.time_slider = QSlider()
         self.time_slider.setOrientation(Qt.Horizontal)
         self.time_slider.setMinimum(0)
         self.time_slider.setMaximum(0)
         self.time_slider.setEnabled(False)
+        self.time_slider.setMinimumHeight(22)
         self.time_slider.sliderPressed.connect(self._on_time_slider_pressed)
         self.time_slider.sliderReleased.connect(self._on_time_slider_released)
         self.time_slider.valueChanged.connect(self._on_time_slider_changed)
-        control_layout.addWidget(self.time_slider, stretch=1)
+        playback_layout.addWidget(self.time_slider, stretch=10)  # ✅ Gets maximum space
 
         self.time_end_label = QLabel("--:--:--")
-        control_layout.addWidget(self.time_end_label)
+        self.time_end_label.setMinimumWidth(60)
+        playback_layout.addWidget(self.time_end_label)
 
-        self.time_label = QLabel("Now: --:--:--")
-        control_layout.addWidget(self.time_label)
+        layout.addLayout(playback_layout)
 
-        self.aircraft_label = QLabel("Aircraft: 0")
-        control_layout.addWidget(self.aircraft_label)
-
-        self.help_btn = QPushButton("❓ Help")
-        self.help_btn.clicked.connect(self.show_help)
-        control_layout.addWidget(self.help_btn)
-
-        control_layout.addStretch()
-
-        layout.addLayout(control_layout)
         self.setLayout(layout)
 
+        # Timer and shortcuts
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_simulation)
 
@@ -594,128 +618,162 @@ class MapWidget(QWidget):
 
             window.updateAircraft = function(data, showLabels) {
                 window.showLabels = showLabels;
-
+            
+                // Track which markers should remain open
                 var currentOpenPopups = {};
                 Object.keys(aircraftMarkers).forEach(function(markerId) {
                     var marker = aircraftMarkers[markerId];
-                    
                     if (marker.isPopupOpen()) {
                         currentOpenPopups[markerId] = true;
                     }
-                    
-                    if (marker.trailLine) {
-                        map.removeLayer(marker.trailLine);
-                    }
-                    
-                    map.removeLayer(marker);
                 });
-
-                openPopups = currentOpenPopups;
-                aircraftMarkers = {};
-
+            
+                // ✅ Update existing markers instead of removing all
+                var seenMarkers = {};
+                
                 data.forEach(function(aircraft) {
                     var markerId = aircraft.address + '_' + aircraft.cat;
+                    seenMarkers[markerId] = true;
+                    
                     var badgeColor = (aircraft.cat === 21 ? '#FFA500' : '#FF4D4D');
                     var srcText = (aircraft.cat === 21 ? 'ADS-B (CAT021)' : 'Radar (CAT048)');
-
+                    
                     var rotation = aircraft.heading || 0;
                     var trailKey = aircraft.address + '_' + aircraft.cat;
-
+            
+                    // Calculate rotation from trail
                     if (aircraftTrails[trailKey] && aircraftTrails[trailKey].length >= 2) {
                         var trail = aircraftTrails[trailKey];
                         var prevPos = trail[trail.length - 2];
                         var currPos = trail[trail.length - 1];
-
                         var latDiff = Math.abs(currPos.lat - prevPos.lat);
                         var lonDiff = Math.abs(currPos.lon - prevPos.lon);
-
+                        
                         if (latDiff > 0.0001 || lonDiff > 0.0001) {
                             rotation = getBearing(prevPos.lat, prevPos.lon, currPos.lat, currPos.lon);
                             aircraft.lastRotation = rotation;
-                            
                         } else if (aircraft.lastRotation !== undefined) {
                             rotation = aircraft.lastRotation;
                         }
-                        
                     } else if (aircraft.lastRotation !== undefined) {
                         rotation = aircraft.lastRotation;
                     }
-
-                    var icon = L.divIcon({
-                        html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>',
-                        className: 'aircraft-marker',
-                        iconSize: [26, 26],
-                        iconAnchor: [13, 13]
-                    });
-
+            
                     var altitudeStr = aircraft.altitude_display || 'N/A';
                     var mode3aStr = aircraft.mode3a || 'N/A';
-
+                    
                     var popupContent = '<b>' + (aircraft.callsign || aircraft.address) + '</b><br>' +
-                                   '<strong>Source:</strong> ' + srcText + '<br>' +
-                                   '<strong>Mode3/A:</strong> ' + mode3aStr + '<br>' +
-                                   '<strong>Altitude:</strong> ' + altitudeStr + '<br>' +
-                                   '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
-                                   '<strong>Heading:</strong> ' + Math.round(rotation) + '°';
-
-                    var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500});
-
-                    var popup = L.popup({
-                        autoClose: false,
-                        closeOnClick: false
-                    }).setContent(popupContent);
-
-                    marker.bindPopup(popup);
-
-                    marker.on('popupopen', function() {
-                        openPopups[markerId] = true;
-                    });
-
-                    marker.on('popupclose', function() {
-                        delete openPopups[markerId];
-                    });
-
-                    if (showLabels && aircraft.callsign) {
-                        marker.bindTooltip(aircraft.callsign, {
-                            permanent: true,
-                            direction: 'top',
-                            offset: [0, -10],
-                            opacity: 0.9,
-                            className: 'aircraft-label'
+                                       '<strong>Source:</strong> ' + srcText + '<br>' +
+                                       '<strong>Mode3/A:</strong> ' + mode3aStr + '<br>' +
+                                       '<strong>Altitude:</strong> ' + altitudeStr + '<br>' +
+                                       '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
+                                       '<strong>Heading:</strong> ' + Math.round(rotation) + '°';
+            
+                    // ✅ If marker exists, UPDATE it instead of recreating
+                    if (aircraftMarkers[markerId]) {
+                        var existingMarker = aircraftMarkers[markerId];
+                        
+                        // Update position
+                        existingMarker.setLatLng([aircraft.lat, aircraft.lon]);
+                        
+                        // Update icon rotation
+                        var icon = L.divIcon({
+                            html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>',
+                            className: 'aircraft-marker',
+                            iconSize: [26, 26],
+                            iconAnchor: [13, 13]
                         });
+                        existingMarker.setIcon(icon);
+                        
+                        // ✅ Update popup content WITHOUT closing it
+                        if (existingMarker.getPopup()) {
+                            existingMarker.getPopup().setContent(popupContent);
+                        }
+                        
+                        // Update label if needed
+                        if (showLabels && aircraft.callsign) {
+                            if (!existingMarker.getTooltip()) {
+                                existingMarker.bindTooltip(aircraft.callsign, {
+                                    permanent: true,
+                                    direction: 'top',
+                                    offset: [0, -10],
+                                    opacity: 0.9,
+                                    className: 'aircraft-label'
+                                });
+                            }
+                        } else {
+                            existingMarker.unbindTooltip();
+                        }
+                        
+                        // Update trail
+                        if (existingMarker.trailLine) {
+                            map.removeLayer(existingMarker.trailLine);
+                        }
+                        
+                    } else {
+                        // ✅ Create NEW marker only if it doesn't exist
+                        var icon = L.divIcon({
+                            html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>',
+                            className: 'aircraft-marker',
+                            iconSize: [26, 26],
+                            iconAnchor: [13, 13]
+                        });
+            
+                        var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500});
+                        
+                        var popup = L.popup({
+                            autoClose: false,
+                            closeOnClick: false
+                        }).setContent(popupContent);
+                        
+                        marker.bindPopup(popup);
+                        
+                        marker.on('popupopen', function() {
+                            currentOpenPopups[markerId] = true;
+                        });
+                        
+                        marker.on('popupclose', function() {
+                            delete currentOpenPopups[markerId];
+                        });
+            
+                        if (showLabels && aircraft.callsign) {
+                            marker.bindTooltip(aircraft.callsign, {
+                                permanent: true,
+                                direction: 'top',
+                                offset: [0, -10],
+                                opacity: 0.9,
+                                className: 'aircraft-label'
+                            });
+                        }
+            
+                        marker.addTo(map);
+                        marker.lastRotation = rotation;
+                        aircraftMarkers[markerId] = marker;
                     }
-
-                    marker.addTo(map);
-                    marker.lastRotation = rotation;
-                    aircraftMarkers[markerId] = marker;
-
-                    if (openPopups[markerId]) {
-                        marker.openPopup();
+                    
+                    // ✅ Reopen popup if it was open before
+                    if (currentOpenPopups[markerId]) {
+                        aircraftMarkers[markerId].openPopup();
                     }
-
+            
+                    // Update trail
                     if (!aircraftTrails[trailKey]) {
                         aircraftTrails[trailKey] = [];
                     }
-
-                    var newPoint = {
-                        lat: aircraft.lat,
-                        lon: aircraft.lon,
-                        time: aircraft.time_sec || 0
-                    };
-
+            
+                    var newPoint = {lat: aircraft.lat, lon: aircraft.lon, time: aircraft.time_sec || 0};
                     var trail = aircraftTrails[trailKey];
-
+            
                     if (trail.length === 0 ||
                         Math.abs(newPoint.lat - trail[trail.length-1].lat) > 0.0001 ||
                         Math.abs(newPoint.lon - trail[trail.length-1].lon) > 0.0001) {
                         trail.push(newPoint);
                     }
-
+            
                     if (trail.length > 1) {
                         var trailColor = getAircraftColor(aircraft.address);
                         var trailCoords = trail.map(function(p) { return [p.lat, p.lon]; });
-
-                        marker.trailLine = L.polyline(trailCoords, {
+                        aircraftMarkers[markerId].trailLine = L.polyline(trailCoords, {
                             color: trailColor,
                             weight: 2,
                             opacity: 0.7,
@@ -723,6 +781,19 @@ class MapWidget(QWidget):
                             lineJoin: 'round',
                             smoothFactor: 1.0
                         }).addTo(map);
+                    }
+                });
+            
+                // ✅ Remove markers for aircraft that are no longer visible
+                Object.keys(aircraftMarkers).forEach(function(markerId) {
+                    if (!seenMarkers[markerId]) {
+                        var marker = aircraftMarkers[markerId];
+                        if (marker.trailLine) {
+                            map.removeLayer(marker.trailLine);
+                        }
+                        map.removeLayer(marker);
+                        delete aircraftMarkers[markerId];
+                        delete aircraftTrails[markerId];
                     }
                 });
             };

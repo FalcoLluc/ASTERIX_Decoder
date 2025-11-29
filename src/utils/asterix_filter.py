@@ -33,33 +33,57 @@ class AsterixFilter:
 
     @staticmethod
     def filter_airborne(df: pd.DataFrame) -> pd.DataFrame:
-        """Filter for airborne aircraft using any available indicator."""
+        """
+        Filter for airborne aircraft using category-specific indicators.
+        CAT021: GBS == 0 (not on ground)
+        CAT048: STAT_code in [0, 2] (airborne)
+        """
+        if 'CAT' not in df.columns:
+            return df
+
         if 'STAT_code' not in df.columns and 'GBS' not in df.columns:
             return df
 
+        # Start with no records selected
         mask = pd.Series(False, index=df.index)
+
+        # ✅ CAT048: Filter by STAT_code (only for CAT048 records)
         if 'STAT_code' in df.columns:
-            mask = mask | df['STAT_code'].isin([0, 2])
+            cat048_mask = (df['CAT'] == 48) & df['STAT_code'].isin([0, 2])
+            mask = mask | cat048_mask
+
+        # ✅ CAT021: Filter by GBS (only for CAT021 records)
         if 'GBS' in df.columns:
-            mask = mask | (df['GBS'] == 0)
+            cat021_mask = (df['CAT'] == 21) & (df['GBS'] == 0)
+            mask = mask | cat021_mask
 
         return df[mask].reset_index(drop=True)
 
     @staticmethod
     def filter_on_ground(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Filter for aircraft on ground using any available indicator.
-        CAT021: GBS=1 (on ground)
+        Filter for aircraft on ground using category-specific indicators.
+        CAT021: GBS == 1 (on ground)
         CAT048: STAT_code in [1, 3] (on ground)
         """
+        if 'CAT' not in df.columns:
+            return df
+
         if 'STAT_code' not in df.columns and 'GBS' not in df.columns:
             return df
 
+        # Start with no records selected
         mask = pd.Series(False, index=df.index)
+
+        # ✅ CAT048: Filter by STAT_code (only for CAT048 records)
         if 'STAT_code' in df.columns:
-            mask = mask | df['STAT_code'].isin([1, 3])
+            cat048_mask = (df['CAT'] == 48) & df['STAT_code'].isin([1, 3])
+            mask = mask | cat048_mask
+
+        # ✅ CAT021: Filter by GBS (only for CAT021 records)
         if 'GBS' in df.columns:
-            mask = mask | (df['GBS'] == 1)
+            cat021_mask = (df['CAT'] == 21) & (df['GBS'] == 1)
+            mask = mask | cat021_mask
 
         return df[mask].reset_index(drop=True)
 
@@ -185,24 +209,34 @@ class AsterixFilter:
     def filter_by_speed(df: pd.DataFrame,
                         min_speed: Optional[float] = None,
                         max_speed: Optional[float] = None) -> pd.DataFrame:
-        """Filter by ground speed"""
-        # Try GS field first (BDS 5.0)
-        speed_col = None
-        if 'GS' in df.columns:
-            speed_col = 'GS'
-        elif 'GS(kt)' in df.columns:
-            speed_col = 'GS(kt)'
+        """
+        Filter by ground speed.
+        Uses GS_TVP(kt) (radar) preferentially, falls back to GS_BDS(kt) (Mode S).
+        """
+        has_tvp = 'GS_TVP(kt)' in df.columns
+        has_bds = 'GS_BDS(kt)' in df.columns
 
-        if speed_col is None:
+        if min_speed==0 or (has_tvp and not has_bds):
             return df
 
-        result = df.copy()
-        if min_speed is not None:
-            result = result[result[speed_col] >= min_speed]
-        if max_speed is not None:
-            result = result[result[speed_col] <= max_speed]
+        # Combine speed columns (prefer TVP, fallback to BDS)
+        if has_tvp and has_bds:
+            speed = df['GS_TVP(kt)'].fillna(df['GS_BDS(kt)'])
+        elif has_tvp:
+            speed = df['GS_TVP(kt)']
+        else:
+            speed = df['GS_BDS(kt)']
 
-        return result.reset_index(drop=True)
+        # ✅ Start by excluding records without speed data
+        mask = speed.notna()
+
+        if min_speed is not None:
+            mask = mask & (speed >= min_speed)
+
+        if max_speed is not None:
+            mask = mask & (speed <= max_speed)
+
+        return df[mask].reset_index(drop=True)
 
     @staticmethod
     def filter_by_aircraft_addresses(df: pd.DataFrame, addresses: List[str]) -> pd.DataFrame:
