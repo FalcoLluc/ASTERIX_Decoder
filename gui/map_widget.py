@@ -551,7 +551,12 @@ class MapWidget(QWidget):
                 maxZoom: 19, attribution: '', opacity: 0.95
             }).addTo(map);
 
-            var radarIcon = L.divIcon({ html: '<div style="font-size: 32px; text-shadow: 0 0 4px rgba(0,0,0,0.5);">𖦏</div>', className: 'aircraft-marker', iconSize: [32, 32], iconAnchor: [16, 16] });
+            var radarIcon = L.divIcon({
+                html: '<div style="font-size: 18px; font-weight: bold; color: #8B4513; text-shadow: 0 0 4px rgba(0,0,0,0.8);">📡</div>',
+                className: 'aircraft-marker',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
             L.marker([41.300702, 2.102058], {icon: radarIcon, zIndexOffset: 1000}).bindPopup('<b>Barcelona Radar</b><br>SAC: 20, SIC: 129').addTo(map);
 
             var legend = L.control({position: 'topright'});
