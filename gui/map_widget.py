@@ -453,10 +453,10 @@ class MapWidget(QWidget):
             dist_vertical_km = abs(alt2_m - alt1_m) / 1000
             dist_3d_km = math.sqrt(dist_horizontal_nm ** 2 / (0.539957 ** 2) + dist_vertical_km ** 2)
             dist_nm = dist_3d_km * 0.539957
-            dist_label = f"{dist_nm:.1f} NM"
+            dist_label = f"{dist_nm:.3f} NM"
         else:
             dist_nm = dist_horizontal_nm
-            dist_label = f"{dist_nm:.1f} NM"
+            dist_label = f"{dist_nm:.3f} NM"
 
         return [{
             'from_lat': lat1,
