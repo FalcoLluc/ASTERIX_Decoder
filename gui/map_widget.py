@@ -25,7 +25,6 @@ def geodetic_to_conformal_lat(lat_rad: float) -> float:
 class MapWidget(QWidget):
     """Widget for displaying aircraft positions on 2D/3D map with trajectory tracking."""
 
-
     def __init__(self):
         super().__init__()
         self.df = None
@@ -44,7 +43,10 @@ class MapWidget(QWidget):
         self.show_heatmap = False
         self.show_separation = False
         self.departure_schedule = []
+        self.first_radar_detections = {}
+        self.prev_distances_to_thr = {}
         self.init_ui()
+
 
     def _format_hms(self, seconds: float) -> str:
         """Convert seconds to HH:MM:SS format."""
@@ -379,36 +381,108 @@ class MapWidget(QWidget):
         self.departure_schedule = schedule
 
     def calculate_separation_lines(self, aircraft_list):
-        """Calcular línea entre los dos últimos despegues del Excel."""
-
         if not self.show_separation or not self.departure_schedule:
             return []
 
+        detected_to_remove = [
+            callsign for callsign, det_time in self.first_radar_detections.items()
+            if det_time > self.current_time
+        ]
+        for callsign in detected_to_remove:
+            del self.first_radar_detections[callsign]
+            if callsign in self.prev_distances_to_thr:
+                del self.prev_distances_to_thr[callsign]
+
+        THRESHOLDS = {
+            'LEBL-24L': {'lat': 41 + 17 / 60 + 31.99 / 3600, 'lon': 2 + 6 / 60 + 11.81 / 3600},
+            'LEBL-06R': {'lat': 41 + 16 / 60 + 56.32 / 3600, 'lon': 2 + 4 / 60 + 27.66 / 3600},
+            'LEBL-24R': {'lat': 41 + 16 / 60 + 56.32 / 3600, 'lon': 2 + 4 / 60 + 27.66 / 3600},
+            'LEBL-06L': {'lat': 41 + 17 / 60 + 31.99 / 3600, 'lon': 2 + 6 / 60 + 11.81 / 3600}
+        }
+
+        live_positions = {}
+        for ac in aircraft_list:
+            raw_call = ac.get('callsign', '')
+            if raw_call:
+                clean_call = str(raw_call).strip().upper()
+                if clean_call not in live_positions:
+                    live_positions[clean_call] = ac
+                elif ac.get('cat') == 48:
+                    live_positions[clean_call] = ac
+
+        schedule_dict = {callsign: (atot, runway) for callsign, atot, runway in self.departure_schedule}
+
+        for callsign, (atot, runway) in schedule_dict.items():
+            if callsign in self.first_radar_detections:
+                continue
+
+            if self.current_time < atot:
+                continue
+
+            if callsign not in live_positions:
+                continue
+
+            if runway not in THRESHOLDS:
+                continue
+
+            ac = live_positions[callsign]
+            threshold = THRESHOLDS[runway]
+
+            try:
+                lat0_rad = math.radians(TMA_CENTER_LAT)
+                lon0_rad = math.radians(TMA_CENTER_LON)
+                chi0 = geodetic_to_conformal_lat(lat0_rad)
+
+                lat_ac_rad = math.radians(ac['lat'])
+                lon_ac_rad = math.radians(ac['lon'])
+                chi_ac = geodetic_to_conformal_lat(lat_ac_rad)
+                dlon_ac = lon_ac_rad - lon0_rad
+                denom_ac = 1 + math.sin(chi0) * math.sin(chi_ac) + math.cos(chi0) * math.cos(chi_ac) * math.cos(dlon_ac)
+                if abs(denom_ac) < 1e-10:
+                    continue
+                k_ac = (2 * RADIO_ESFERA_CONFORME_NM) / denom_ac
+                x_ac = k_ac * math.cos(chi_ac) * math.sin(dlon_ac)
+                y_ac = k_ac * (
+                            math.cos(chi0) * math.sin(chi_ac) - math.sin(chi0) * math.cos(chi_ac) * math.cos(dlon_ac))
+
+                lat_thr_rad = math.radians(threshold['lat'])
+                lon_thr_rad = math.radians(threshold['lon'])
+                chi_thr = geodetic_to_conformal_lat(lat_thr_rad)
+                dlon_thr = lon_thr_rad - lon0_rad
+                denom_thr = 1 + math.sin(chi0) * math.sin(chi_thr) + math.cos(chi0) * math.cos(chi_thr) * math.cos(
+                    dlon_thr)
+                if abs(denom_thr) < 1e-10:
+                    continue
+                k_thr = (2 * RADIO_ESFERA_CONFORME_NM) / denom_thr
+                x_thr = k_thr * math.cos(chi_thr) * math.sin(dlon_thr)
+                y_thr = k_thr * (math.cos(chi0) * math.sin(chi_thr) - math.sin(chi0) * math.cos(chi_thr) * math.cos(
+                    dlon_thr))
+
+                dist_to_thr = math.sqrt((x_ac - x_thr) ** 2 + (y_ac - y_thr) ** 2)
+
+                prev_dist = self.prev_distances_to_thr.get(callsign)
+
+                if prev_dist is not None and dist_to_thr >= 0.5 and dist_to_thr > prev_dist:
+                    self.first_radar_detections[callsign] = self.current_time
+
+                self.prev_distances_to_thr[callsign] = dist_to_thr
+
+            except:
+                continue
+
         departed = [
-            (callsign, time_dep)
-            for (callsign, time_dep) in self.departure_schedule
-            if time_dep <= self.current_time
+            callsign for callsign in self.first_radar_detections.keys()
+            if callsign in live_positions
         ]
 
         if len(departed) < 2:
             return []
 
-        departed_sorted = sorted(departed, key=lambda x: x[1])
+        departed_sorted = sorted(departed, key=lambda c: self.first_radar_detections[c])
         last_two = departed_sorted[-2:]
 
-        penultimo_callsign = last_two[0][0]
-        ultimo_callsign = last_two[1][0]
-
-        live_positions = {}
-
-        for ac in aircraft_list:
-            raw_call = ac.get('callsign', '')
-            if raw_call:
-                clean_call = str(raw_call).strip().upper()
-                live_positions[clean_call] = ac
-
-        if penultimo_callsign not in live_positions or ultimo_callsign not in live_positions:
-            return []
+        penultimo_callsign = last_two[0]
+        ultimo_callsign = last_two[1]
 
         ac1 = live_positions[penultimo_callsign]
         ac2 = live_positions[ultimo_callsign]

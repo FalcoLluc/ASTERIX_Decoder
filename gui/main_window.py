@@ -421,7 +421,6 @@ class AsterixGUI(QMainWindow):
                 QMessageBox.warning(self, "Error", "No se encuentra columna de Hora.")
                 return
 
-            # Obtener callsigns que existen en el radar
             if self.df_raw is not None and 'TI' in self.df_raw.columns:
                 radar_callsigns = set(self.df_raw['TI'].dropna().astype(str).str.strip().str.upper())
             else:
@@ -475,7 +474,8 @@ class AsterixGUI(QMainWindow):
 
             schedule = list(zip(
                 df_sorted['Indicativo_clean'],
-                df_sorted['sec']
+                df_sorted['sec'],
+                df_sorted['PistaDesp']
             ))
 
             if hasattr(self, 'map_widget'):
@@ -663,18 +663,26 @@ class AsterixGUI(QMainWindow):
         self.apply_dynamic_filters()
 
     def update_map(self):
+
         if self.df_display is None or self.df_display.empty:
             return
+
         map_columns = ['LAT', 'LON', 'TI', 'TA', 'Time_sec', 'CAT', 'FL', 'H(ft)',
                        'Mode3/A', 'GS_TVP(kt)', 'GS_BDS(kt)']
+
         available_cols = [col for col in map_columns if col in self.df_display.columns]
+
         if len(available_cols) < 3:
             return
+
         try:
             map_data = self.df_display[available_cols]
             self.map_widget.load_data(map_data)
+            self.map_widget.first_radar_detections = {}
+            self.map_widget.prev_distances_to_thr = {}
+
         except Exception as e:
-            print(f"❌ Error updating map: {str(e)}")
+            print(f"Error updating map: {str(e)}")
 
     def update_status_label(self):
         if self.df_display is None:
