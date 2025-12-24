@@ -1464,12 +1464,16 @@ class MapWidget(QWidget):
 
         self._last_update_time = self.current_time
 
-        time_window = 5
+        time_window = 4
         mask = (self.df['Time_sec'] >= self.current_time - time_window) & (
-                    self.df['Time_sec'] <= self.current_time + time_window)
+                    self.df['Time_sec'] <= self.current_time)
         current_aircraft = self.df[mask]
 
-        if 'CAT' in current_aircraft.columns:
+        if self.source_filter == 'radar':
+            current_aircraft = current_aircraft[current_aircraft['CAT'] == 48]
+        elif self.source_filter == 'adsb':
+            current_aircraft = current_aircraft[current_aircraft['CAT'] == 21]
+        elif 'CAT' in current_aircraft.columns:
             current_aircraft = current_aircraft[current_aircraft['CAT'].isin([21, 48])]
 
         if 'TA' not in current_aircraft.columns or current_aircraft.empty:
