@@ -1,18 +1,19 @@
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                                QSlider, QLabel, QComboBox, QCheckBox, QMessageBox,
-                                QDialog, QTextBrowser)
+                               QSlider, QLabel, QComboBox, QCheckBox, QMessageBox,
+                               QDialog, QTextBrowser)
 from PySide6.QtGui import QShortcut, QKeySequence
 import pandas as pd
 import json
 import math
 
-#VALORES DISTANCIA p3 (Código adaptado a lo de los compañeros del p3)
+# VALORES DISTANCIA p3 (Código adaptado a lo de los compañeros del p3)
 # Constantes de proyección
-TMA_CENTER_LAT = 41 + 6/60 + 56.560/3600  # 41°06'56.560"N
-TMA_CENTER_LON = 1 + 41/60 + 33.010/3600  # 1°41'33.010"E
+TMA_CENTER_LAT = 41 + 6 / 60 + 56.560 / 3600  # 41°06'56.560"N
+TMA_CENTER_LON = 1 + 41 / 60 + 33.010 / 3600  # 1°41'33.010"E
 RADIO_ESFERA_CONFORME_NM = 3438.954
+
 
 def geodetic_to_conformal_lat(lat_rad: float) -> float:
     e = 0.0818191908426
@@ -22,9 +23,9 @@ def geodetic_to_conformal_lat(lat_rad: float) -> float:
     chi = 2 * math.atan(term1 * term2) - math.pi / 2
     return chi
 
+
 class MapWidget(QWidget):
     """Widget for displaying aircraft positions on 2D/3D map with trajectory tracking."""
-
 
     def __init__(self):
         super().__init__()
@@ -179,7 +180,7 @@ class MapWidget(QWidget):
         """Display help dialog with all controls and features explained."""
 
         help_text = """
-        
+
     <h2>ASTERIX DECODER - USER GUIDE</h2>
 
     <h3>🎮 Playback Controls (Top Bar)</h3>
@@ -279,7 +280,6 @@ class MapWidget(QWidget):
     </ul>
     """
 
-
         dialog = QDialog(self)
         dialog.setWindowTitle("ASTERIX DECODER - USER GUIDE")
         dialog.resize(800, 700)
@@ -297,7 +297,6 @@ class MapWidget(QWidget):
 
         dialog.setLayout(layout)
         dialog.exec()
-
 
     def toggle_labels(self, state):
         """Toggle aircraft labels on/off."""
@@ -473,8 +472,8 @@ class MapWidget(QWidget):
     def load_base_map(self):
 
         html = """
-        
-        
+
+
     <!DOCTYPE html>
     <html>
     <head>
@@ -484,7 +483,7 @@ class MapWidget(QWidget):
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
         <style>
-        
+
             body { margin: 0; padding: 0; }
             #map { width: 100%; height: 100vh; }
             .aircraft-marker { background: transparent; border: none; display: flex; align-items: center; justify-content: center; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); }
@@ -500,7 +499,7 @@ class MapWidget(QWidget):
     <body>
         <div id="map"></div>
         <script>
-        
+
             var separationLines = [];
             var isSeparationMode = false;
 
@@ -567,7 +566,7 @@ class MapWidget(QWidget):
                     '<div class="item"><span class="swatch" style="background:#FF4D4D"></span>Radar (CAT048)</div>';
                 return div;
             };
-            
+
             legend.addTo(map);
 
             var aircraftMarkers = {};
@@ -601,7 +600,7 @@ class MapWidget(QWidget):
                 if (window.heatLayer) {
                     map.removeLayer(window.heatLayer);
                 }
-                
+
                 window.heatLayer = L.heatLayer(data, {
                     radius: 20,
                     blur: 15,
@@ -623,7 +622,7 @@ class MapWidget(QWidget):
 
             window.updateAircraft = function(data, showLabels) {
                 window.showLabels = showLabels;
-            
+
                 // Track which markers should remain open
                 var currentOpenPopups = {};
                 Object.keys(aircraftMarkers).forEach(function(markerId) {
@@ -632,20 +631,20 @@ class MapWidget(QWidget):
                         currentOpenPopups[markerId] = true;
                     }
                 });
-            
+
                 // ✅ Update existing markers instead of removing all
                 var seenMarkers = {};
-                
+
                 data.forEach(function(aircraft) {
                     var markerId = aircraft.address + '_' + aircraft.cat;
                     seenMarkers[markerId] = true;
-                    
+
                     var badgeColor = (aircraft.cat === 21 ? '#FFA500' : '#FF4D4D');
                     var srcText = (aircraft.cat === 21 ? 'ADS-B (CAT021)' : 'Radar (CAT048)');
-                    
+
                     var rotation = aircraft.heading || 0;
                     var trailKey = aircraft.address + '_' + aircraft.cat;
-            
+
                     // Calculate rotation from trail
                     if (aircraftTrails[trailKey] && aircraftTrails[trailKey].length >= 2) {
                         var trail = aircraftTrails[trailKey];
@@ -653,7 +652,7 @@ class MapWidget(QWidget):
                         var currPos = trail[trail.length - 1];
                         var latDiff = Math.abs(currPos.lat - prevPos.lat);
                         var lonDiff = Math.abs(currPos.lon - prevPos.lon);
-                        
+
                         if (latDiff > 0.0001 || lonDiff > 0.0001) {
                             rotation = getBearing(prevPos.lat, prevPos.lon, currPos.lat, currPos.lon);
                             aircraft.lastRotation = rotation;
@@ -663,24 +662,24 @@ class MapWidget(QWidget):
                     } else if (aircraft.lastRotation !== undefined) {
                         rotation = aircraft.lastRotation;
                     }
-            
+
                     var altitudeStr = aircraft.altitude_display || 'N/A';
                     var mode3aStr = aircraft.mode3a || 'N/A';
-                    
+
                     var popupContent = '<b>' + (aircraft.callsign || aircraft.address) + '</b><br>' +
                                        '<strong>Source:</strong> ' + srcText + '<br>' +
                                        '<strong>Mode3/A:</strong> ' + mode3aStr + '<br>' +
                                        '<strong>Altitude:</strong> ' + altitudeStr + '<br>' +
                                        '<strong>Speed:</strong> ' + (aircraft.speed !== null ? Math.round(aircraft.speed) : 'N/A') + ' kt<br>' +
                                        '<strong>Heading:</strong> ' + Math.round(rotation) + '°';
-            
+
                     // ✅ If marker exists, UPDATE it instead of recreating
                     if (aircraftMarkers[markerId]) {
                         var existingMarker = aircraftMarkers[markerId];
-                        
+
                         // Update position
                         existingMarker.setLatLng([aircraft.lat, aircraft.lon]);
-                        
+
                         // Update icon rotation
                         var icon = L.divIcon({
                             html: '<div style="transform: rotate(' + (rotation - 90) + 'deg); display: inline-block; font-size: 26px; text-shadow: 0 0 3px rgba(0,0,0,0.5); color:' + badgeColor + ';">✈</div>',
@@ -689,12 +688,12 @@ class MapWidget(QWidget):
                             iconAnchor: [13, 13]
                         });
                         existingMarker.setIcon(icon);
-                        
+
                         // ✅ Update popup content WITHOUT closing it
                         if (existingMarker.getPopup()) {
                             existingMarker.getPopup().setContent(popupContent);
                         }
-                        
+
                         // Update label if needed
                         if (showLabels && aircraft.callsign) {
                             if (!existingMarker.getTooltip()) {
@@ -709,12 +708,12 @@ class MapWidget(QWidget):
                         } else {
                             existingMarker.unbindTooltip();
                         }
-                        
+
                         // Update trail
                         if (existingMarker.trailLine) {
                             map.removeLayer(existingMarker.trailLine);
                         }
-                        
+
                     } else {
                         // ✅ Create NEW marker only if it doesn't exist
                         var icon = L.divIcon({
@@ -723,24 +722,24 @@ class MapWidget(QWidget):
                             iconSize: [26, 26],
                             iconAnchor: [13, 13]
                         });
-            
+
                         var marker = L.marker([aircraft.lat, aircraft.lon], {icon: icon, zIndexOffset: 500});
-                        
+
                         var popup = L.popup({
                             autoClose: false,
                             closeOnClick: false
                         }).setContent(popupContent);
-                        
+
                         marker.bindPopup(popup);
-                        
+
                         marker.on('popupopen', function() {
                             currentOpenPopups[markerId] = true;
                         });
-                        
+
                         marker.on('popupclose', function() {
                             delete currentOpenPopups[markerId];
                         });
-            
+
                         if (showLabels && aircraft.callsign) {
                             marker.bindTooltip(aircraft.callsign, {
                                 permanent: true,
@@ -750,31 +749,31 @@ class MapWidget(QWidget):
                                 className: 'aircraft-label'
                             });
                         }
-            
+
                         marker.addTo(map);
                         marker.lastRotation = rotation;
                         aircraftMarkers[markerId] = marker;
                     }
-                    
+
                     // ✅ Reopen popup if it was open before
                     if (currentOpenPopups[markerId]) {
                         aircraftMarkers[markerId].openPopup();
                     }
-            
+
                     // Update trail
                     if (!aircraftTrails[trailKey]) {
                         aircraftTrails[trailKey] = [];
                     }
-            
+
                     var newPoint = {lat: aircraft.lat, lon: aircraft.lon, time: aircraft.time_sec || 0};
                     var trail = aircraftTrails[trailKey];
-            
+
                     if (trail.length === 0 ||
                         Math.abs(newPoint.lat - trail[trail.length-1].lat) > 0.0001 ||
                         Math.abs(newPoint.lon - trail[trail.length-1].lon) > 0.0001) {
                         trail.push(newPoint);
                     }
-            
+
                     if (trail.length > 1) {
                         var trailColor = getAircraftColor(aircraft.address);
                         var trailCoords = trail.map(function(p) { return [p.lat, p.lon]; });
@@ -788,7 +787,7 @@ class MapWidget(QWidget):
                         }).addTo(map);
                     }
                 });
-            
+
                 // ✅ Remove markers for aircraft that are no longer visible
                 Object.keys(aircraftMarkers).forEach(function(markerId) {
                     if (!seenMarkers[markerId]) {
@@ -810,7 +809,7 @@ class MapWidget(QWidget):
                     }
                     map.removeLayer(marker);
                 });
-                
+
                 aircraftMarkers = {};
                 aircraftTrails = {};
                 aircraftColors = {};
@@ -830,8 +829,8 @@ class MapWidget(QWidget):
     def load_3d_map(self):
 
         html = """
-        
-        
+
+
     <!DOCTYPE html>
     <html>
     <head>
@@ -857,19 +856,19 @@ class MapWidget(QWidget):
                 line-height: 1.6;
                 z-index: 1000;
             }
-            
+
             .legend-title {
                 font-weight: bold;
                 margin-bottom: 8px;
                 font-size: 14px;
             }
-            
+
             .legend-item {
                 display: flex;
                 align-items: center;
                 margin: 5px 0;
             }
-            
+
             .legend-swatch {
                 width: 16px;
                 height: 16px;
@@ -891,7 +890,7 @@ class MapWidget(QWidget):
                 z-index: 999;
                 line-height: 1.4;
             }
-            
+
             .controls-hint strong {
                 color: #333;
             }
@@ -909,19 +908,19 @@ class MapWidget(QWidget):
                 border-left: 4px solid #007bff;
                 pointer-events: none;
             }
-            
+
             .popup-title {
                 font-weight: bold;
                 font-size: 14px;
                 margin-bottom: 6px;
                 color: #333;
             }
-            
+
             .popup-content {
                 line-height: 1.5;
                 color: #555;
             }
-            
+
             .popup-close {
                 position: absolute;
                 top: 5px;
@@ -931,11 +930,11 @@ class MapWidget(QWidget):
                 color: #999;
                 pointer-events: auto;
             }
-            
+
             .popup-close:hover {
                 color: #333;
             }
-            
+
         </style>
     </head>
     <body>
@@ -985,7 +984,7 @@ class MapWidget(QWidget):
                     touchRotate: true,
                     keyboard: true
                 },
-                
+
                 layers: [],
                 onClick: handleClick
             });
@@ -1407,7 +1406,6 @@ class MapWidget(QWidget):
         self.update_time_label()
         self.update_aircraft_positions()
 
-
     def update_time_label(self):
         """Update time display label."""
 
@@ -1449,7 +1447,6 @@ class MapWidget(QWidget):
     def update_aircraft_positions(self):
         """Update aircraft markers and trajectories based on current time."""
 
-
         if self.df is None or self.df.empty:
             return
 
@@ -1464,12 +1461,16 @@ class MapWidget(QWidget):
 
         self._last_update_time = self.current_time
 
-        time_window = 5
+        time_window = 4
         mask = (self.df['Time_sec'] >= self.current_time - time_window) & (
-                    self.df['Time_sec'] <= self.current_time + time_window)
+                self.df['Time_sec'] <= self.current_time)
         current_aircraft = self.df[mask]
 
-        if 'CAT' in current_aircraft.columns:
+        if self.source_filter == 'radar':
+            current_aircraft = current_aircraft[current_aircraft['CAT'] == 48]
+        elif self.source_filter == 'adsb':
+            current_aircraft = current_aircraft[current_aircraft['CAT'] == 21]
+        elif 'CAT' in current_aircraft.columns:
             current_aircraft = current_aircraft[current_aircraft['CAT'].isin([21, 48])]
 
         if 'TA' not in current_aircraft.columns or current_aircraft.empty:
@@ -1485,7 +1486,6 @@ class MapWidget(QWidget):
             cat = int(row.get('CAT')) if pd.notna(row.get('CAT')) else None
 
             if ta is None or cat not in [21, 48]:
-
                 continue
 
             latest_by_ta_cat[(ta, cat)] = row
